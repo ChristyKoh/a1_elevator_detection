@@ -9,13 +9,10 @@ Functions to extract elevator acceleration and height
 from numpy import floor
 import rospy
 
-from unitree_legged_msgs import HighState
-from sensor_msgs.msg import IMU
+from unitree_legged_msgs.msg import HighState
+from sensor_msgs.msg import Imu
 
-def get_altitude(high_state):
-    _, accelerometer, _ = high_state.imu
-    print(accelerometer)
-    return 0.0
+
 
 def calculate_floor(accelerometer_arr):
     

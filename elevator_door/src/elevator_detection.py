@@ -20,7 +20,7 @@ from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from elevator_door.msg import ElevatorDoorState
 import matplotlib.pyplot as plt
 
-from door_state import determine_elevator_state
+from door_state import ElevatorStateTracker, determine_elevator_state
 
 def get_camera_matrix(camera_info_msg):
     return np.array(camera_info_msg.K).reshape((3,3))
@@ -43,6 +43,9 @@ class ElevatorImageProcess:
         self.messages = deque([], 5)
         self.pointcloud_frame = None
 
+        self.state_tracker = ElevatorStateTracker(queue_len=5)
+
+        # init subscribers
         points_sub = message_filters.Subscriber(points_sub_topic, PointCloud2)
         image_sub = message_filters.Subscriber(image_sub_topic, Image)
         caminfo_sub = message_filters.Subscriber(cam_info_topic, CameraInfo)
@@ -50,10 +53,12 @@ class ElevatorImageProcess:
         # self._bridge = CvBridge()
         # self.listener = tf.TransformListener()
         
+        # init publishers
         # self.points_pub = rospy.Publisher(points_pub_topic, PointCloud2, queue_size=10)
         self.image_pub = rospy.Publisher(image_pub_topic, Image, queue_size=10)
         self.state_pub = rospy.Publisher(state_pub_topic, ElevatorDoorState, queue_size=10)
         
+        # synchronize input from all three subscribers
         ts = message_filters.ApproximateTimeSynchronizer([points_sub, image_sub, caminfo_sub],
                                                           10, 0.1, allow_headerless=True)
         ts.registerCallback(self.callback)
@@ -89,22 +94,25 @@ class ElevatorImageProcess:
             # points_msg = numpy_to_pc2_msg(points)
             # self.points_pub.publish(points_msg)
 
-            pub_image, door_state = determine_elevator_state(image)
+            # pub_image, _ = determine_elevator_state(image)
+            self.state_tracker.apply_hough_line_tfm(image)
+            door_state = self.state_tracker.get_state(points, image, info)
 
             # convert numpy image array to msg
-            img_msg = ros_numpy.msgify(Image, pub_image, encoding='mono8')
-            img_msg.header.stamp = rospy.Time.now()
-            img_msg.header.frame_id = 'camera_depth_optical_frame'
+            # img_msg = ros_numpy.msgify(Image, pub_image, encoding='mono8')
+            # img_msg.header.stamp = rospy.Time.now()
+            # img_msg.header.frame_id = 'camera_depth_optical_frame'
 
             # publish image and door state string
-            self.image_pub.publish(img_msg)
+            # self.image_pub.publish(img_msg)
             self.state_pub.publish(door_state)
-            print("Published state at timestamp:", img_msg.header.stamp.secs)
+            # print("Published state at timestamp:", img_msg.header.stamp.secs)
 
 
 if __name__ == '__main__':
     CAM_INFO_TOPIC = '/camera/color/camera_info'
     RGB_IMAGE_TOPIC = '/camera/color/image_raw'
+    DEPTH_IMAGE_TOPIC = '/camera/depth/image_rect_raw'
     POINTS_TOPIC = '/camera/depth/color/points'
     IMAGE_PUB_TOPIC = '/elevator/image'
     STATE_PUB_TOPIC = '/elevator/door_state'
@@ -113,7 +121,7 @@ if __name__ == '__main__':
     process = ElevatorImageProcess(POINTS_TOPIC, RGB_IMAGE_TOPIC,
                                 CAM_INFO_TOPIC, IMAGE_PUB_TOPIC,
                                 STATE_PUB_TOPIC)
-    r = rospy.Rate(1000)
+    r = rospy.Rate(100)  # 100 Hz
 
     while not rospy.is_shutdown():
         process.publish_once_from_queue()

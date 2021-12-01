@@ -12,8 +12,8 @@ from collections import deque
 
 import rospy
 
-from unitree_legged_msgs import HighState
-from sensor_msgs.msg import IMU
+from unitree_legged_msgs.msg import HighState
+from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool
 
 import altitude_calc as ac
@@ -24,20 +24,33 @@ class CheckElevatorFloorProcess:
     '''
     def __init__(self, a1_states, floor_node):
         self.num_steps = 0
+        self.start_time = 0.0
+        self.is_moving_in_z_dir = False
         
         self.messages = deque([], 5)
-        a1_sub = rospy.Subscriber(a1_states, HighState)
+        a1_sub = rospy.Subscriber(a1_states, HighState, self.callback)
         
         self.elevator_floor_pub = rospy.Publisher(floor_node, Bool, queue_size=10)
-        self.callback(a1_sub)
+        # self.callback(a1_sub)
     
-    def callback(self, a1_sub):
+    def callback(self, high_state):
         try:
-            a1_state = ac.get_altitude(a1_sub)
+            a1_state = self.get_altitude(high_state)
         except Exception as e:
             rospy.logerr(e)
             return
         self.messages.appendleft(a1_state)
+    
+    def get_altitude(self, high_state):
+        x,y,z_acceleration = high_state.imu.accelerometer
+        print('position:' + str(high_state.position))
+        print('z_acceleration:'+ str(z_acceleration))
+        # initially around 9.8 m/s^2
+        # calculate when moving and then 
+            # calculate previous iteration of moving 
+        # else:
+        #    self.is_moving_in_z_dir = True
+        return 0.0
         
     def publish_once_from_queue(self):
         if self.messages:
@@ -48,8 +61,8 @@ class CheckElevatorFloorProcess:
                 return
              
             self.elevator_floor_pub.publish(False)
-            print("Published floor msg at timestamp:",
-                   floor.header.stamp.secs)
+            # print("Published floor msg at timestamp:",
+            #       floor.header.stamp.secs)
 
 def main():
     IMU_NODE = '/a1_states'
