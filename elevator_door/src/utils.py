@@ -24,30 +24,47 @@ def get_vertical_edges(image, init=[]):
         """
         Extract vertical lines from Hough Line Transform algorithm
         """
+        delta = 0.1
+
         vertical_edges = init  # init with parameter
         src = image
 
+        deg_res = math.pi/180
+
         # extract Canny edges
         dst = cv2.Canny(src, 50, 200, None, 3)
-        # copy edges to result image
-        cdst = cv2.cvtColor(dst, cv2.COLOR_GRAY2BGR)
         # apply Hough Line Transform
-        lines = cv2.HoughLines(dst, 1, np.pi / 180, 100, None, 0, 0)
+        right_lines = cv2.HoughLines(dst, 1, deg_res, 100, None, 0, 0, deg_res)
+        left_lines = cv2.HoughLines(dst, 1, deg_res, 100, None, 0, math.pi - 0.15)
+        # right_lines = None
+
+        if right_lines is None:
+            lines = left_lines
+        elif left_lines is None:
+            lines = right_lines
+        else:
+            lines = np.vstack((right_lines, left_lines))
+
+        # lines = cv2.HoughLines(dst, 1, deg_res, 150, None, 0, 0)
+
 
         if lines is None:
-            return
+            print('\nNO LINES\n')
+            return []
 
+
+        print(len(lines))
         # filter for only near-vertical lines
         for line in lines:
-            if not is_vertical(line):
-                continue
+            # if not is_vertical(line):
+            #     continue
 
             rho, theta = line[0][0], line[0][1]
             x = int(rho * math.cos(theta))
 
             heapq.heappush(vertical_edges, x)
 
-        return vertical_edges #, cdst
+        return vertical_edges
 
 
 def project_points(pts, cam_matrix, trans, rot):
