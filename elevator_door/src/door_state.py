@@ -5,22 +5,25 @@ Functions to extract elevator door state.
 """
 
 from collections import deque
+import heapq
 
 import rospy
 import numpy as np
 import cv2
 import math
+import tf
 
 import ros_numpy
 
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Image
 from elevator_door.msg import ElevatorDoorState
+from utils import *
 
 import matplotlib.pyplot as plt
 
 
-class ElevatorStateTracker:
+class ElevatorDoorTracker:
     """
     Tracks state of elevator door from sequence of images, 
     taking into account the last n images.
@@ -29,71 +32,23 @@ class ElevatorStateTracker:
     """
     def __init__(self, queue_len=5):
         self.queue_len = queue_len
-        self.vertical_edges = deque([], queue_len)
+
+        self.prev_frame = None
+        self.vertical_edges = []
+        self.door_frame = [0, 640]  # default entire screen
+        self.door_opening = [0, 0]  # default leftmost
 
         # reference for door depth
-        self.door_depth = 0
+        self.door_depth = 0.0
 
         # ElevatorDoorState values, default closed
         self.state = ElevatorDoorState.CLOSED
-        self.is_moving = False
-        self.is_inside_view = False
+        self.is_moving = False    
 
-    def is_vertical(self, line):
-        """
-        Returns True if given a line returned by Hough line detector, its slope 
-        theta (angle from the x-axis) is within delta of pi/2.
-        """
-        theta = line[0][1]
-        print(theta)
-        delta = 0.1
-        return min(abs(theta - math.pi), theta) <= delta
+    def set_door_depth(self, depth):
+        self.door_depth = depth
 
-    def apply_hough_line_tfm(self, image):
-
-        # PERFORM HOUGH LINE TRANSFORM
-        src = image
-
-        dst = cv2.Canny(src, 50, 200, None, 3)
-    
-        # Copy edges to the images that will display the results in BGR
-        cdst = cv2.cvtColor(dst, cv2.COLOR_GRAY2BGR)
-        
-        lines = cv2.HoughLines(dst, 1, np.pi / 180, 100, None, 0, 0)
-
-        if lines is not None:
-
-            # print(lines)
-            # print("hough detector num lines is %d" % len(lines))
-
-            # filter for only near-vertical lines
-            vert_lines = filter(self.is_vertical, lines)
-            print("vertical filtered num lines is %d" % len(vert_lines))
-
-            lines = vert_lines
-            self.vertical_edges = sorted(vert_lines, key=lambda x: x[0][0])
-            print(self.vertical_edges)
-
-            for i in range(0, len(lines)):
-                rho = lines[i][0][0]
-                theta = lines[i][0][1]
-                a = math.cos(theta)
-                b = math.sin(theta)
-                x0 = a * rho
-                y0 = b * rho
-                pt1 = (int(x0 + 1000*(-b)), int(y0 + 1000*(a)))
-                pt2 = (int(x0 - 1000*(-b)), int(y0 - 1000*(a)))
-                cv2.line(cdst, pt1, pt2, (0,0,255), 3, cv2.LINE_AA)  
-            
-            # draw ref line
-            cv2.line(cdst, (0,0), (0, 300), (0,0,255), 3, cv2.LINE_AA)
-
-        # publish identified lines
-        hough_pub = rospy.Publisher('elevator/hough_lines', Image, queue_size=10)
-        img_msg = ros_numpy.msgify(Image, cdst, encoding='rgb8')
-        hough_pub.publish(img_msg)
-
-    def get_state(self, points, image, info):
+    def get_state(self, points, image, cam_matrix, trans, rot, print_state=False):
         """
         Returns ElevatorDoorState, whether door is moving
         
@@ -105,87 +60,141 @@ class ElevatorStateTracker:
             4) (when inside) above an initialized depth --> since first known state is closed
 
         use laser scan to position robot x distance away from door
-
-        note: sometimes have blackouts
         """
-        delta = 100 # min diff in depth img value to be considered "deep"
+        depth_delta = 0.1 # min diff in depth value to be considered sig. diff
+        image_delta = 20  # min diff in px value to be sig. diff
 
         # using pointcloud, sample depth between each identified line
-        xz = np.vstack((points['x'], points['z']))
-        # sort by x
-        xz = sorted(xz, key=lambda pt: pt[0])
-        avg_z = np.mean(xz, axis=0)
-
-        # using depth image
-        # image_avg = np.mean(image, axis=0) # take mean depth across y-values
-        # image_grad = np.gradient(image_avg)
-
-        if len(self.vertical_edges):
-
-            # left and right bounds of elevator door (relatively increased depth)
-            left = 0.0
-            right = 0.0
-            # one way flag to find transition from deep -> shallow
-            found_deep = False
-
-            for edge in self.vertical_edges:
-                left = right          # update left edge so next sample
-                right = edge[0][0]    # take rho
-                midpt = (right - left) // 2 + left # floordiv to bias toward left if difference is very small
-
-                print(right, left, midpt)
-                if abs(midpt) < 10: # ignore if diff btw lines is negligible
-                    continue
-
-                i, sample = next(((i, pt) for (i, pt) in enumerate(xz) if midpt <= pt[0] < right), (-1, []))
-
-                print(i, sample)
-                if len(sample) == 0:
-                    print("none found")
-                elif sample - delta > self.door_depth:
-                    # deeper than door depth
-                    print("deep")
-                else:
-                    found_deep = True
-                    print("shallow")
-
+        xyz = np.vstack((points['x'], points['y'], points['z']))
+        pixel_coords = project_points(xyz, cam_matrix, trans, rot)
         
-        if self.state == ElevatorDoorState.CLOSED: # update door distance when closed
-            # using pointcloud
-            self.door_depth = (self.door_depth + avg_z) / 2
-            # using depth image
-            # self.door_depth = (self.door_depth + image_avg[400]) // 2
-            print("door depth", self.door_depth)
+        image_h, image_w = image.shape[:2]
+
+        # take top points to cut out most of the ground
+        height_lower_bound = image_h / 2
+        in_frame = ((0 <= pixel_coords[0]) & (pixel_coords[0] < image_w)
+                    & (height_lower_bound <= pixel_coords[1]) & (pixel_coords[1] < image_h))
+
+        points = points[in_frame]
+        pixel_coords = pixel_coords[:, in_frame]
+
+        # calc avg depth for use in thresholding
+        avg_z = np.average(points['z'])
+
+        # left and right bounds of elevator
+        door_left, door_right = -1, -1
+        last_depth = 0
+
+        # left and right bounds of image window
+        left = 0
+        right = 0
+        # one way flag to detect deep region
+        found_deep = False
+        # one way flag to detect door movement
+        self.is_moving = False
+
+        self.vertical_edges = get_vertical_edges(image, [640])
+        edges = self.vertical_edges
+        # self.vertical_edges, canny = get_vertical_edges(image, [640])
+        # publish_annotated_image(self.vertical_edges, canny)
+
+        while len(edges) > 0:
+            edge = int(heapq.heappop(edges))
+
+            left = right    # update left bound to next sample
+            right = edge    # update right bound to current edge
+            midpt = (right - left) // 2 + left # floordiv to bias toward left if difference is very small
+
+            # print(right, left, midpt)
+            if abs(midpt) < 10: # ignore if diff btw lines is negligible
+                continue
+
+            # sample first depth point
+            in_window = ((i, points[i]) for i, pt in enumerate(pixel_coords.T) 
+                                            if midpt <= pt[0] < right)
+            i, sample = next(in_window, (-1, []))
+            
+            # print(sample)
+            # print(pixel_coords[:,i])
+
+            if len(sample) == 0:
+                print("no pointcloud data found between x-vals %d and %d" % (left, right))
+                continue
+
+            ### determine door bounds
+            sample_depth = sample[2]
+
+            is_deep = lambda depth: depth - depth_delta > self.door_depth
+            if is_deep(sample_depth): # beyond door depth
+                # DEEP!
+                # print("deep")
+                found_deep = True
+                if print_state:
+                    print(" " * int(sample_depth) + "-")
+                
+                # update left door frame and opening
+                if not is_deep(last_depth): # shallow -> deep
+                    self.is_moving = True
+                    self.door_frame[0] = min(left, self.door_frame[0])
+                    self.door_opening[0] = left
+                
+            else: # <= threshold door depth
+                # SHALLOW!
+                # print("shallow")
+                if print_state:
+                    print("-")
+                
+                # update right door frame and opening
+                if is_deep(last_depth): # last depth deep
+                    self.is_moving = True
+                    self.door_frame[1] = max(right, self.door_frame[1])
+                    self.door_opening[1] = right
+
+            ### determine elevator door state
+            if found_deep:
+                if self.is_moving:
+                    # based on prev state, update state
+                    if self.state == ElevatorDoorState.OPEN:
+                        self.state == ElevatorDoorState.CLOSING
+                    elif self.state == ElevatorDoorState.CLOSED:
+                        self.state == ElevatorDoorState.OPENING
+                else: # not moving
+                    self.state = ElevatorDoorState.OPEN
+            else:
+                self.state = ElevatorDoorState.CLOSED
+            
+            last_depth = sample_depth
+
+        door_state = ElevatorDoorState(self.is_moving, self.state, 
+                                        self.door_frame[0], self.door_frame[1],
+                                        self.door_opening[0], self.door_opening[1])
+        if print_state:
+            print(door_state)
+            print('')
+
+        return door_state
+
+    def publish_annotated_image(self):
+        background_img = np.zeros((480, 640, 3)).astype(np.uint8)
+
+        # vertical edges
+        for x in self.vertical_edges:
+            cv2.line(background_img, (x, 0), (x, 480), (255,0,0), 3, cv2.LINE_AA)
+
+        # elevator frame
+        cv2.line(background_img, (self.door_frame[0], 0), (self.door_frame[0], 480), (0,0,255), 3, cv2.LINE_AA)
+        cv2.line(background_img, (self.door_frame[1], 0), (self.door_frame[1], 480), (0,0,255), 3, cv2.LINE_AA)
+
+        # elevator opening
+        cv2.line(background_img, (self.door_opening[0], 0), (self.door_opening[0], 480), (0,255,0), 3, cv2.LINE_AA)
+        cv2.line(background_img, (self.door_opening[1], 0), (self.door_opening[1], 480), (0,255,0), 3, cv2.LINE_AA)
+
+        # publish line-annotated image
+        hough_pub = rospy.Publisher('elevator/hough_lines', Image, queue_size=10)
+        img_msg = ros_numpy.msgify(Image, background_img, encoding='rgb8')
+        hough_pub.publish(img_msg)
 
 
-        # if len(self.vertical_edges) == n:
-            # TODO calculate gradient between subsequent images
-            # if is_moving --> closing or opening
-            # once stopped, closing --> closed and opening --> open
-        # else:
-            # TODO add to vertical edges
-        # plt.imshow(image)
-
-        # plt.title("x pos and depth")
-        # plt.scatter(points['x'], points['z'])
-        # plt.show()
-
-        #plt.title("elevator depth histogram along x")
-        #image_avg = np.mean(image, axis=0) # take mean depth across y-values
-        # image_avg = np.max(image, axis=0) # take max depth across y-values
-        #image_grad = np.gradient(image_avg)
-        # print(image.shape)
-        # print(len(image_avg))
-        #plt.scatter(np.arange(image.shape[1]), image_grad)
-        # plt.hist(image)
-        # plt.hist(points['z'])
-        #plt.show()
-
-        # avg_z = np.mean(xz, axis=0)
-        # avg_depth_pub = rospy.Publisher('elevator/avg_depth', Float32, queue_size=10)
-        # avg_depth_pub.publish(avg_z)
-
-        return ElevatorDoorState(False, ElevatorDoorState.CLOSED)
 
 def determine_elevator_state(image):
     """

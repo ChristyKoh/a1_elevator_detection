@@ -20,7 +20,7 @@ from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from elevator_door.msg import ElevatorDoorState
 import matplotlib.pyplot as plt
 
-from door_state import ElevatorStateTracker, determine_elevator_state
+from door_state import ElevatorDoorTracker, determine_elevator_state
 
 def get_camera_matrix(camera_info_msg):
     return np.array(camera_info_msg.K).reshape((3,3))
@@ -43,7 +43,7 @@ class ElevatorImageProcess:
         self.messages = deque([], 5)
         self.pointcloud_frame = None
 
-        self.state_tracker = ElevatorStateTracker(queue_len=5)
+        self.state_tracker = ElevatorDoorTracker(queue_len=5)
 
         # init subscribers
         points_sub = message_filters.Subscriber(points_sub_topic, PointCloud2)
@@ -51,7 +51,7 @@ class ElevatorImageProcess:
         caminfo_sub = message_filters.Subscriber(cam_info_topic, CameraInfo)
 
         # self._bridge = CvBridge()
-        # self.listener = tf.TransformListener()
+        self.listener = tf.TransformListener()
         
         # init publishers
         # self.points_pub = rospy.Publisher(points_pub_topic, PointCloud2, queue_size=10)
@@ -69,6 +69,7 @@ class ElevatorImageProcess:
             intrinsic_matrix = get_camera_matrix(info)
             rgb_image = ros_numpy.numpify(image)
             points = ros_numpy.numpify(points_msg)
+            #print(points_msg.fields)
         except Exception as e:
             rospy.logerr(e)
             return
@@ -79,24 +80,27 @@ class ElevatorImageProcess:
     def publish_once_from_queue(self):
         if self.messages:
             points, image, info = self.messages.pop()
-            # try:
-            #     trans, rot = self.listener.lookupTransform(
-            #                                            '/camera_color_optical_frame',
-            #                                            '/camera_depth_optical_frame',
-            #                                            rospy.Time(0))
-            #     rot = tf.transformations.quaternion_matrix(rot)[:3, :3]
-            # except (tf.LookupException,
-            #         tf.ConnectivityException, 
-            #         tf.ExtrapolationException):
-            #     return
+            try:
+                trans, rot = self.listener.lookupTransform(
+                                                       '/camera_color_optical_frame',
+                                                       '/camera_depth_optical_frame',
+                                                       rospy.Time(0))
+                rot = tf.transformations.quaternion_matrix(rot)[:3, :3]
+            except (tf.LookupException,
+                    tf.ConnectivityException, 
+                    tf.ExtrapolationException):
+                return
             # points = isolate_object_of_interest(points, image, info, 
             #     np.array(trans), np.array(rot))
             # points_msg = numpy_to_pc2_msg(points)
             # self.points_pub.publish(points_msg)
 
             # pub_image, _ = determine_elevator_state(image)
-            self.state_tracker.apply_hough_line_tfm(image)
-            door_state = self.state_tracker.get_state(points, image, info)
+            print(rospy.get_time())
+            self.state_tracker.set_door_depth(0.5)
+            door_state = self.state_tracker.get_state(points, image, info,
+                np.array(trans), np.array(rot), print_state=True)
+            self.state_tracker.publish_annotated_image()
 
             # convert numpy image array to msg
             # img_msg = ros_numpy.msgify(Image, pub_image, encoding='mono8')
