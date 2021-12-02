@@ -25,6 +25,7 @@ def get_vertical_edges(image, init=[]):
         Extract vertical lines from Hough Line Transform algorithm
         """
         delta = 0.1
+        vote_threshold = 120
 
         vertical_edges = init  # init with parameter
         src = image
@@ -34,8 +35,8 @@ def get_vertical_edges(image, init=[]):
         # extract Canny edges
         dst = cv2.Canny(src, 50, 200, None, 3)
         # apply Hough Line Transform
-        right_lines = cv2.HoughLines(dst, 1, deg_res, 100, None, 0, 0, deg_res)
-        left_lines = cv2.HoughLines(dst, 1, deg_res, 100, None, 0, math.pi - 0.15)
+        right_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, 0, deg_res)
+        left_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, math.pi - 0.15)
         # right_lines = None
 
         if right_lines is None:
