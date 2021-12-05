@@ -60,7 +60,7 @@ class ElevatorImageProcess:
         
         # synchronize input from all three subscribers
         ts = message_filters.ApproximateTimeSynchronizer([points_sub, image_sub, caminfo_sub],
-                                                          10, 0.1, allow_headerless=True)
+                                                          20, 0.1, allow_headerless=True)
         ts.registerCallback(self.callback)
 
     
@@ -79,6 +79,7 @@ class ElevatorImageProcess:
 
 
     def publish_once_from_queue(self):
+        # print(len(self.messages))
         if self.messages:
             points, image, info = self.messages.pop()
             try:
@@ -99,8 +100,8 @@ class ElevatorImageProcess:
                 self.state_tracker.set_door_depth_average(points)
             door_state = self.state_tracker.process_state(points, image, info,
                 np.array(trans), np.array(rot), print_state=False)
-            self.state_tracker.publish_annotated_image()
-
+            # self.state_tracker.publish_annotated_image()
+            
             # convert numpy image array to msg
             # img_msg = ros_numpy.msgify(Image, pub_image, encoding='mono8')
             # img_msg.header.stamp = rospy.Time.now()
@@ -120,7 +121,9 @@ if __name__ == '__main__':
     IMAGE_PUB_TOPIC = '/elevator/image'
     STATE_PUB_TOPIC = '/elevator/door_state'
 
+    print("initializing node")
     rospy.init_node('elevator_node')
+    print("initializing process")
     process = ElevatorImageProcess(POINTS_TOPIC, RGB_IMAGE_TOPIC,
                                 CAM_INFO_TOPIC, IMAGE_PUB_TOPIC,
                                 STATE_PUB_TOPIC)

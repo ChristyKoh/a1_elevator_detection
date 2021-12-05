@@ -10,6 +10,8 @@ import cv2
 import ros_numpy
 from sensor_msgs.msg import Image
 
+from utils import *
+
 def apply_sobel(img):
     """
     Given numpy repn of image, apply sobel filter
@@ -69,21 +71,40 @@ def get_single_callback(pub):
     Returns callback that applies filter to input image and
         publishes to the appropriate topic.
     """   
+    def callback(image):
         img = ros_numpy.numpify(image)
         sobel_msg = apply_depth_sobel(img)
         print("publishing msg")
         pub.publish(sobel_msg)
     return callback
 
-def main():
-    sobely_pub = rospy.Publisher('sobely', Image, queue_size=10)
-    canny_pub = rospy.Publisher('canny', Image, queue_size=10)
-    sobely_depth_pub = rospy.Publisher('sobely_depth', Image, queue_size=10)
-    # canny_depth_pub = rospy.Publisher('canny_depth', Image, queue_size=10)
+def hough_callback(image):
+    rgb_image = ros_numpy.numpify(image)
 
-    image_sub = rospy.Subscriber('/camera/color/image_raw', Image, get_double_callback(sobely_pub, canny_pub))
-    depth_sub = rospy.Subscriber('/camera/depth/image_rect_raw', Image, get_single_callback(sobely_pub))
+    vertical_edges = get_vertical_edges(rgb_image, [640])
+
+    background_img = np.zeros((480, 640, 3)).astype(np.uint8)
+
+    # vertical edges
+    for x in vertical_edges:
+        cv2.line(background_img, (x, 0), (x, 480), (255,0,0), 3, cv2.LINE_AA)
+    
+    img_msg = ros_numpy.msgify(Image, background_img, encoding='rgb8')
+    hough_pub = rospy.Publisher('elevator/hough_lines', Image, queue_size=10)
+    hough_pub.publish(img_msg)
+
+
+def main():
+    # sobely_pub = rospy.Publisher('sobely', Image, queue_size=10)
+    # canny_pub = rospy.Publisher('canny', Image, queue_size=10)
+    # sobely_depth_pub = rospy.Publisher('sobely_depth', Image, queue_size=10)
+    # # canny_depth_pub = rospy.Publisher('canny_depth', Image, queue_size=10)
+
+    # image_sub = rospy.Subscriber('/camera/color/image_raw', Image, get_double_callback(sobely_pub, canny_pub))
+    # depth_sub = rospy.Subscriber('/camera/depth/image_rect_raw', Image, get_single_callback(sobely_pub))
         
+    image_sub = rospy.Subscriber('/camera/color/image_raw', Image, hough_callback)
+
     rospy.spin()
 
 if __name__ == '__main__':
