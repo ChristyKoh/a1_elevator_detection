@@ -8,10 +8,11 @@ and publishes to elevator_floor to notify which floor the guide dog is on.
 Functions to extract elevator acceleration and height
 """
 from collections import deque
-
-import message_filters
+import numpy as np
 import rospy
-import datetime
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from scipy import integrate
 
 from unitree_legged_msgs.msg import HighState
 from elevator_door.msg import ElevatorDoorState
@@ -29,40 +30,32 @@ class CheckElevatorFloorProcess:
 
     def __init__(self, a1_states, floor_node, elevator_door, diagnostic_node):
         self.num_steps = 0
-        self.time_arr = []
         self.is_moving = False
         self.forward_velocity = 0.0
         self.accelerations = []
+        self.time_arr = []
         self.door_states = []
         
         self.messages = deque([], 5)
         a1_sub = rospy.Subscriber(a1_states, HighState, self.a1_state_callback)
-        diagnostic_sub = rospy.Subscriber(diagnostic_node, DiagnosticArray, self.time_callback)
         door_sub = rospy.Subscriber(elevator_door, ElevatorDoorState, self.elevator_state_callback)
 
         self.elevator_floor_pub = rospy.Publisher(
             floor_node, Bool, queue_size=10)
 
-    def time_callback(self, diagnostic):
-        try:
-            time = diagnostic.header.stamp
-            self.time_arr.append(time)
-            # print('Time:'+ str(diagnostic.header.stamp))
-        except Exception as e:
-            rospy.logerr(e)
-            return
-
     def a1_state_callback(self, high_state):
         try:
             acceleration = ac.get_acceleration(high_state)
+            time =  rospy.Time.now() - rospy.Time()
+            self.time_arr.append(time)
+            self.accelerations.append(acceleration)
             # print('Acceleration: '+ str(acceleration))
-            self.is_moving =  acceleration > 1 
-            print(self.is_moving)
+            # self.animate(acceleration,time)
         except Exception as e:
             rospy.logerr(e)
             return
         
-        self.messages.appendleft(high_state)
+        self.messages.appendleft([acceleration,time])
 
     def elevator_state_callback(self, door_state):
         try:
@@ -97,14 +90,15 @@ class CheckElevatorFloorProcess:
         
         # self.messages.appendleft([high_state, diag_sub, door_state])
 
+
     def publish_once_from_queue(self):
         if self.messages:
             # let's just publish after after not_moving->not_moving time period
-            high_state = self.messages.pop()
-            # acceleration = high_state.imu.accelerometer[2]
+            acceleration, time = self.messages.pop()
+            # sduration = (time - self.time_arr[-1]).toSec()
             try:
-                time_passed = self.time_arr[-1] - self.time_arr[0]
-                distance = ac.calculate_distance(high_state, time_passed)
+                if not self.is_moving:
+                    distance = ac.calculate_distance(acceleration, time)
                 # print('Distance: ' + str(distance))
             except Exception as e:
                 return
@@ -113,6 +107,41 @@ class CheckElevatorFloorProcess:
             # print("Published floor msg at timestamp:",
             #       floor.header.stamp.secs)
 
+def plot_acceleration(process):
+    data = np.array(process.accelerations)
+    # times = np.array(process.time_arr[:len(data)]) - rospy.Time()
+    # times = np.array(list(map(lambda x: x.secs, times)))
+   
+    smooth_data = ac.smooth_data(process.accelerations)
+    # infls = np.where(np.diff(np.sign(smooth_data)))[0]
+    plt.plot(data, label='Noisy Data')
+    plt.plot(smooth_data, label='Smooth Data')
+    # velocity = integrate.cumtrapz(smooth_data)
+    # distance = integrate.cumtrapz(velocity)
+    # print(velocity)
+    # print(distance)
+    # plt.plot(velocity, label='Velocity')
+    # plt.plot(distance, label='Distance')
+    # for i, infl in enumerate(infls,1):
+    #     plt.axvline(x=infl, color='k',label='Inflection point %d'%(i))
+    plt.legend()
+    plt.show()
+
+ # def animate(i, xs, ys):
+        
+    #     ys = ys[-20:]
+    #     xs = xs[-20:]
+
+    #     ax.clear()
+    #     ax.plot(xs, ys)
+
+    #     plt.xticks(rotation=45, ha='right')
+    #     plt.subplots_adjust(bottom=0.3)
+    #     plt.title('Accelerations over Time')
+    #     plt.ylabel('Acceleration (m/s^2)')
+
+    #     ani = animation.FuncAnimation(fig, animate, fargs=(xs,ys), interval=1000)
+    #     plt.show()
 
 def main():
     IMU_NODE = '/a1_states'
@@ -124,12 +153,13 @@ def main():
     rospy.init_node('elevator_floor', anonymous=True)
     process = CheckElevatorFloorProcess(IMU_NODE, ELEVATOR_FLOOR_NODE, ELEVATOR_DOOR_NODE, DIAGNOSTIC_NODE)
 
-    r = rospy.Rate(1000)
+    r = rospy.Rate(1)
 
     while not rospy.is_shutdown():
         process.publish_once_from_queue()
         r.sleep()
 
+    plot_acceleration(process)
 
 if __name__ == '__main__':
     main()
