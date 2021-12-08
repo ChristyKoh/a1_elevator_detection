@@ -29,18 +29,28 @@ class CheckElevatorFloorProcess:
     '''
 
     def __init__(self, a1_states, floor_node, elevator_door, diagnostic_node):
+
         self.num_steps = 0
         self.is_moving = False
         self.forward_velocity = 0.0
         self.accelerations = []
         self.time_arr = []
         self.door_states = []
+
+        # CONSTANTS
+        self.floor_height = 6 # TODO change estimate
+
+        # VARIABLES
+        self.current_floor = 1 # TODO write service to set current floor
+        self.past_accels = deque([], 100)
+        self.velocity = 0.0
+        self.displacement = 0.0
+        self.delta_t = 0.002
         
         # messages as deque (with max length = 5) instead of list?
         self.messages = []
         a1_sub = rospy.Subscriber(a1_states, HighState, self.a1_state_callback)
-        door_sub = rospy.Subscriber(elevator_door, ElevatorDoorState, self.elevator_state_callback)
-
+      
         self.elevator_floor_pub = rospy.Publisher(
             floor_node, Bool, queue_size=10)
 
@@ -48,51 +58,38 @@ class CheckElevatorFloorProcess:
         try:
             acceleration = ac.get_acceleration(high_state)
             # is the time the rospy time of the bag file?
-            time =  rospy.Time.now() - rospy.Time()
-            self.time_arr.append(time.to_sec())
+            # time =  rospy.Time.now() 
+
+            # for graphing entire sequence
+            self.time_arr.append(rospy.get_time())
             self.accelerations.append(acceleration)
             self.num_steps += 1
+
+            # TODO apply gaussian 
+            self.velocity += acceleration * self.delta_t
+
+            # check if velocity is 'close enough' to 0
+            # if so, reset velocity and displacement to 0 bc elevator stopped.
+                # calculate - round(curr_displ / floor_height) == number of floors traversed
+
+            # else, update displacement
+            # TODO can create more accurate estimate by averaging past and new velocity (trapezoidal integration)
+            self.displacement += self.velocity * self.delta_t
+
+            self.last_accel = acceleration
+
+            print("Velocity: %.3f" % self.velocity)
+            print("Displacement: %.3f" %self.displacement)
+
+            # TODO publish 
+
             # print('Acceleration: '+ str(acceleration))
             # self.animate(acceleration,time)
         except Exception as e:
             rospy.logerr(e)
             return
         
-        self.messages.append([acceleration,time])
-
-    def elevator_state_callback(self, door_state):
-        try:
-            # why is door state not showing? 
-            # compare past door state
-            if door_state is ElevatorDoorState.CLOSED:
-                print('closed')
-            elif door_state is ElevatorDoorState.OPEN:
-                print('open')
-            # print('Door State:' + str(door_state))
-            past_door_state = ElevatorDoorState.CLOSED
-            if len(door_state > 1):
-                past_door_state = self.door_states.pop(0)
-            
-            # if not moving forward, should be in elevator
-            # is_not_moving =  high_state.velocity[0] == 0 
-            if self.is_not_moving:
-                # self.start_time = # set start time here? or end time?
-                if door_state is ElevatorDoorState.OPENING and past_door_state is ElevatorDoorState.CLOSED:
-                    print('opening')
-                # check if starting to move
-                elif door_state is ElevatorDoorState.CLOSING:  
-                    print('closing')
-                    # self.start_time = # get time here
-                    # want the time between not moving states to calculate distance
-                    # a1_state = self.get_altitude(high_state)
-            self.door_states.append(door_state)
-        
-        except Exception as e:
-            rospy.logerr(e)
-            return
-        
-        # self.messages.appendleft([high_state, diag_sub, door_state])
-
+        self.messages.append([acceleration, rospy.get_time()])
 
     def publish_once_from_queue(self, event):
         
@@ -110,7 +107,7 @@ class CheckElevatorFloorProcess:
             try:
                 # if not self.is_moving:
                 # 100 Hz / sample len(a) = time (s)
-                vel,dist = ac.calc_vel_displacement(accelerations)
+                vel,dist = ac.calc_vel_displacement(accelerations, times)
                 print('Velocity: ' + str(vel))
                 print('Distance: ' + str(dist))
             except Exception as e:
@@ -172,7 +169,7 @@ def main():
     duration = 1
 
     # only calculate velocity and displacement every 5 secs
-    rospy.Timer(rospy.Duration(duration), process.publish_once_from_queue)
+    # rospy.Timer(rospy.Duration(duration), process.publish_once_from_queue)
     while not rospy.is_shutdown():
         # process.publish_once_from_queue()
         r.sleep()
