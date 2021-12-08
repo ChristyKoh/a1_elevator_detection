@@ -2,7 +2,8 @@
 Authors(s): Christy Koh
 Utility functions to support pointcloud projections etc.
 
-Adapted from https://github.com/ucb-ee106/lab6_starter/blob/main/segmentation/src/pointcloud_segmentation.py
+Some parts adapted from EECS106A Fall 2021, Lab 6.
+https://github.com/ucb-ee106/lab6_starter/blob/main/segmentation/src/pointcloud_segmentation.py
 """
 
 import cv2
@@ -10,35 +11,24 @@ import heapq
 import numpy as np
 import math
 
-def is_vertical(line):
-    """
-    Returns True if given a line returned by Hough line detector, its slope 
-    theta (angle from the x-axis) is within delta of pi/2.
-    """
-    delta = 0.1
-
-    theta = line[0][1]
-    return min(abs(theta - math.pi), theta) <= delta
-
-def get_vertical_edges(image, init=[]):
+def get_vertical_edges(image):
         """
         Extract vertical lines from Hough Line Transform algorithm
         """
-        delta = 0.1
-        vote_threshold = 150
-
-        vertical_edges = init  # init with parameter
-        src = image
-
-        deg_res = math.pi/180
+        # tracks whether each line has been seen
+        x_flags = np.zeros((640)) 
+        x_flags[639] = 1
 
         # extract Canny edges
-        dst = cv2.Canny(src, 50, 200, None, 3)
-        # apply Hough Line Transform
-        right_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, 0, deg_res)
-        left_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, math.pi - 0.15)
-        # right_lines = None
+        dst = cv2.Canny(image, 50, 200, None, 3)
 
+        # apply Hough Line Transform
+        deg_res = math.pi/180
+        vote_threshold = 150
+        right_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, 0, deg_res)
+        left_lines = cv2.HoughLines(dst, 1, deg_res, vote_threshold, None, 0, math.pi - deg_res)
+
+        # combine line lists
         if right_lines is None:
             lines = left_lines
         elif left_lines is None:
@@ -46,22 +36,44 @@ def get_vertical_edges(image, init=[]):
         else:
             lines = np.vstack((right_lines, left_lines))
 
+        # if no lines, we still want to check the depth
         if lines is None:
             print('NO LINES')
-            return []
+            return [640]
 
         print("\n NEW LINES ")
         print(len(lines))
-        # filter for only near-vertical lines
+
+        # convert lines to x-values and eliminate duplicates
         for line in lines:
-
             rho, theta = line[0][0], line[0][1]
+            # estimate by taking x-intercept
             x = int(rho * math.cos(theta))
-            print(rho, theta, x)
+            # print(rho, theta, x)
 
-            heapq.heappush(vertical_edges, x)
+            if x > 0 and x_flags[x] == 0:
+                x_flags[x] = 1
 
-        return vertical_edges
+        # get sorted list of lines
+        vertical_edges = sorted(x_flags.nonzero()[0])
+        print(vertical_edges)
+
+        # group lines if significantly close together
+        delta_x = 8
+        last_x = vertical_edges[0] # make sure first element is always added
+        x_cluster = []
+        result = []
+        for x in vertical_edges:
+            if x - last_x < delta_x:
+                x_cluster.append(x)
+            else: 
+                result.append(int(np.mean(x_cluster)))
+                x_cluster = [x]
+            last_x = x
+            
+        # print(result)
+
+        return result
 
 
 def project_points(pts, cam_matrix, trans, rot):

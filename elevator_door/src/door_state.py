@@ -28,7 +28,7 @@ class ElevatorDoorTracker:
     Tracks state of elevator door from sequence of images, 
     taking into account the last n images.
 
-    depth images are 480 x 640px
+    images are 480 x 640px
     """
     def __init__(self, img_shape=(480,640)):
 
@@ -44,14 +44,17 @@ class ElevatorDoorTracker:
 
         # ElevatorDoorState values, default closed
         self.state = ElevatorDoorState.CLOSED
-        self.is_moving = False    
+        self.is_moving = False
+
+        self.hough_pub = rospy.Publisher('elevator/hough_lines', Image, queue_size=10)
 
     def set_door_depth_average(self, points):
         """
         Sets door depth to average depth from a Pointcloud
         """
         self.door_depth = np.average(points['z'])
-        print(self.door_depth)
+        self.state = ElevatorDoorState.CLOSED
+        print("resetting door depth: %.3f" % self.door_depth)
 
     def set_door_depth(self, depth):
         """ Sets door depth manually. """
@@ -93,30 +96,27 @@ class ElevatorDoorTracker:
         points = points[in_frame]
         pixel_coords = pixel_coords[:, in_frame]
 
-        # calc avg depth for use in thresholding
-        avg_z = np.average(points['z'])
-        # if abs(avg_z - self.door_depth) < depth_delta:
-        #     self.state = ElevatorDoorState.CLOSED
-        #     # TODO find single line
-        #     return self.get_state()
-
         # last depth sampled
         last_depth = 0
         # left and right bounds of image window
-        left, right = 0, 0
+        left, right, midpt = 0, 0, 0
         
         # one way flag to detect deep region
         found_deep = False
         # one way flag to detect door movement
         self.is_moving = False
 
-        self.vertical_edges = get_vertical_edges(image, [640])
-        edges = self.vertical_edges[:]
+        # apply hough line transform
+        self.vertical_edges = get_vertical_edges(image)
+        self.vertical_edges.append(640) # always include rightmost edge
 
-        
-        # print("")
-        while len(edges) > 0:
-            edge = int(heapq.heappop(edges))
+        print(self.vertical_edges)
+
+        in_window = ((i, points[i]) for i, pt in enumerate(pixel_coords.T) 
+                                    if midpt <= pt[0] < right)
+
+        for edge in self.vertical_edges:
+            # edge = int(heapq.heappop(edges))
 
             left = right    # update left bound to next sample
             right = edge    # update right bound to current edge
@@ -126,8 +126,7 @@ class ElevatorDoorTracker:
             if abs(midpt - right) < image_delta: # ignore if diff btw lines is negligible
                 continue
 
-            in_window = ((i, points[i]) for i, pt in enumerate(pixel_coords.T) 
-                                        if midpt <= pt[0] < right)
+            # sample depth between window
             i, sample = next(in_window, (-1, []))
 
             if len(sample) == 0:
@@ -171,15 +170,16 @@ class ElevatorDoorTracker:
         
         ### determine elevator door state
         if found_deep:
-            if self.is_moving:
-                # based on prev state, update state
-                if self.state == ElevatorDoorState.OPEN:
-                    self.state == ElevatorDoorState.CLOSING
-                elif self.state == ElevatorDoorState.CLOSED:
-                    self.state == ElevatorDoorState.OPENING
-                # otherwise, remain in the same state
-            else: # not moving
-                self.state = ElevatorDoorState.OPEN
+            self.state = ElevatorDoorState.OPEN
+            # if self.is_moving:
+            #     # based on prev state, update state
+            #     if self.state == ElevatorDoorState.OPEN:
+            #         self.state == ElevatorDoorState.CLOSING
+            #     elif self.state == ElevatorDoorState.CLOSED:
+            #         self.state == ElevatorDoorState.OPENING
+            #     # otherwise, remain in the same state
+            # else: # not moving
+            #     self.state = ElevatorDoorState.OPEN
         else:
             self.state = ElevatorDoorState.CLOSED
 
@@ -193,11 +193,10 @@ class ElevatorDoorTracker:
             cv2.line(background_img, (x, 0), (x, 480), (255,0,0), 3, cv2.LINE_AA)
 
         # elevator frame
-        cv2.rectangle(background_img, (self.door_frame[0], 0), (self.door_frame[1], 480), (0,0,255), 5, cv2.LINE_AA)
+        cv2.rectangle(background_img, (self.door_frame[0], 0), (self.door_frame[1], 480), (0,0,255), 2, cv2.LINE_AA)
         # elevator opening
-        cv2.rectangle(background_img, (self.door_opening[0], 0), (self.door_opening[1], 480), (0,255,0), 3, cv2.LINE_AA)
+        cv2.rectangle(background_img, (self.door_opening[0], 0), (self.door_opening[1], 480), (0,255,0), 2, cv2.LINE_AA)
 
         # publish line-annotated image
-        hough_pub = rospy.Publisher('elevator/hough_lines', Image, queue_size=10)
         img_msg = ros_numpy.msgify(Image, background_img, encoding='rgb8')
-        hough_pub.publish(img_msg)
+        self.hough_pub.publish(img_msg)
