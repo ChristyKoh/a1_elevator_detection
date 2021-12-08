@@ -32,24 +32,20 @@ def started_moving(acceleration):
     
     return True
 
-def calculate_velocity(accelerations, time_passed):
+def calc_vel_displacement(accelerations):
     ''' Calculate if current velocity is 0 
     '''
-    # integrate
-    # z-acceleration initally accounting for gravity
-    # time_passed
+    # print(accelerations, time_arr)
+    smoothed = smooth_data(accelerations)
     
     
-    return []
+    velocity = integrate.simps(accelerations) / 100
+    cum_vel = integrate.cumtrapz(accelerations) / 100
+    displacement = integrate.simps(cum_vel)
+    
+    return velocity, displacement
 
 # around 4/5 m: distance between floors
-
-def calculate_distance(high_state, time_passed):
-    ''' Calculate relative distance
-    '''
-    # how to calculate time passed with unix timestamps?
-    # print('Time Passed: ' + str(time_passed))
-    return calculate_velocity(high_state) * time_passed
     
 ''' Functions to Draw Graph
 '''

@@ -36,7 +36,8 @@ class CheckElevatorFloorProcess:
         self.time_arr = []
         self.door_states = []
         
-        self.messages = deque([], 5)
+        # messages as deque (with max length = 5) instead of list?
+        self.messages = []
         a1_sub = rospy.Subscriber(a1_states, HighState, self.a1_state_callback)
         door_sub = rospy.Subscriber(elevator_door, ElevatorDoorState, self.elevator_state_callback)
 
@@ -46,16 +47,18 @@ class CheckElevatorFloorProcess:
     def a1_state_callback(self, high_state):
         try:
             acceleration = ac.get_acceleration(high_state)
+            # is the time the rospy time of the bag file?
             time =  rospy.Time.now() - rospy.Time()
-            self.time_arr.append(time)
+            self.time_arr.append(time.to_sec())
             self.accelerations.append(acceleration)
+            self.num_steps += 1
             # print('Acceleration: '+ str(acceleration))
             # self.animate(acceleration,time)
         except Exception as e:
             rospy.logerr(e)
             return
         
-        self.messages.appendleft([acceleration,time])
+        self.messages.append([acceleration,time])
 
     def elevator_state_callback(self, door_state):
         try:
@@ -91,16 +94,27 @@ class CheckElevatorFloorProcess:
         # self.messages.appendleft([high_state, diag_sub, door_state])
 
 
-    def publish_once_from_queue(self):
+    def publish_once_from_queue(self, event):
+        
         if self.messages:
             # let's just publish after after not_moving->not_moving time period
-            acceleration, time = self.messages.pop()
+            accelerations = []
+            times = []
+            for each in self.messages:
+                accelerations.append(each[0])
+                times.append(each[1])
+            
+            self.messages = []
+            
             # sduration = (time - self.time_arr[-1]).toSec()
             try:
-                if not self.is_moving:
-                    distance = ac.calculate_distance(acceleration, time)
-                # print('Distance: ' + str(distance))
+                # if not self.is_moving:
+                # 100 Hz / sample len(a) = time (s)
+                vel,dist = ac.calc_vel_displacement(accelerations)
+                print('Velocity: ' + str(vel))
+                print('Distance: ' + str(dist))
             except Exception as e:
+                print(e)
                 return
 
             self.elevator_floor_pub.publish(False)
@@ -116,8 +130,9 @@ def plot_acceleration(process):
     # infls = np.where(np.diff(np.sign(smooth_data)))[0]
     plt.plot(data, label='Noisy Data')
     plt.plot(smooth_data, label='Smooth Data')
-    # velocity = integrate.cumtrapz(smooth_data)
-    # distance = integrate.cumtrapz(velocity)
+    # velocity = integrate.simps(smooth_data)
+    # distance = integrate.simps(velocity)
+    
     # print(velocity)
     # print(distance)
     # plt.plot(velocity, label='Velocity')
@@ -153,10 +168,13 @@ def main():
     rospy.init_node('elevator_floor', anonymous=True)
     process = CheckElevatorFloorProcess(IMU_NODE, ELEVATOR_FLOOR_NODE, ELEVATOR_DOOR_NODE, DIAGNOSTIC_NODE)
 
-    r = rospy.Rate(1)
+    r = rospy.Rate(100)
+    duration = 1
 
+    # only calculate velocity and displacement every 5 secs
+    rospy.Timer(rospy.Duration(duration), process.publish_once_from_queue)
     while not rospy.is_shutdown():
-        process.publish_once_from_queue()
+        # process.publish_once_from_queue()
         r.sleep()
 
     plot_acceleration(process)
