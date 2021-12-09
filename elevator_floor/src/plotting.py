@@ -8,31 +8,34 @@ Some plotting utils to display results
 import numpy as np
 import matplotlib.pyplot as plt
 import altitude_calc as ac
+from scipy import signal
 
-def plot_array(process):
+def plot_accelerations(process):
     data = np.array(process.accelerations_noisy) - process.accel_offset
     smooth_data = process.accelerations
     plt.plot(data, label='Noisy Data')
     plt.plot(smooth_data, label='Smooth Data')
+    plt.xlabel('Frequency (Hz)')
+    plt.ylabel('Acceleration (m/s^2)')
+    plt.title('IMU Acceleration Data')
     plt.legend()
 
     plt.show()
 
 
-def plot_acceleration(process):
-    data = np.array(process.accelerations_noisy) - process.accel_offset
+def plot_vel_displ(process):
+    velocities = process.velocities
+    displacements = process.displacements
     fig, ax = plt.subplots(2)
-    smooth_data = process.accelerations
-    # infls = np.where(np.diff(np.sign(smooth_data)))[0]
-    plt.plot(data, label='Noisy Data')
-    plt.plot(smooth_data, label='Smooth Data')
+    # detrended_vel = signal.detrend(velocities)
+    # detrend removes the linear trend of the data (centers at 0)
+    # plt.plot(detrended_vel, label='Detrended Velocities')
+    ax[0].plot(velocities)
+    ax[1].plot(displacements)
+    # plt.plot(ac.calc_displ(detrended_vel,process.delta_t),label='Adjusted Displacements')
+    plt.xlabel('Frequency (Hz)')
+    ax[0].set_ylabel('Velocity (m/s)')
+    ax[1].set_ylabel('Displacement (m)')
+    plt.suptitle('Calculated Velocities and Displacements')
     plt.legend()
-    
-    v, d = ac.calc_vel_displacement(data, process.delta_t)
-    plt.plot(v)
-    plt.plot(d)
-    
     plt.show()
-    # for i, infl in enumerate(infls,1):
-    #     plt.axvline(x=infl, color='k',label='Inflection point %d'%(i))
-    

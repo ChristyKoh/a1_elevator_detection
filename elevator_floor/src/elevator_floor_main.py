@@ -55,7 +55,7 @@ class CheckElevatorFloorProcess:
 
         # VARIABLES
         self.current_floor = 1 # TODO write service to set current floor
-        self.acceleration = 9.8
+        self.acceleration = 9.8 # should this be 9.9?
         self.velocity = 0.0
         self.displacement = 0.0
         self.delta_t = 0.0025 # 0.002 for 500 Hz
@@ -101,22 +101,29 @@ class CheckElevatorFloorProcess:
                 print("%d floors traversed, curr floor %d." % (floor_diff, self.current_floor)) 
                 # reset displacement
                 print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
+                # prevent displacement from being reset to zero when acceleration = 0 but velocity != 0
+                # if abs(np.mean(self.velocities)) <= self.zero_a_threshold:
                 self.displacement = 0.0
+            # else push False
+            
+            # keep track of whether the last 1000 accelerations were basically zero.
+            # if np.count_nonzero() > 5 # more than 5 accel resets, then assume elevator has stopped.
+                # reset velocity and displacement to 0
 
             self.accelerations.append(acceleration)
+            self.velocities.append(self.velocity)
+            self.displacements.append(self.displacement)
             
             self.velocity += acceleration * self.delta_t
 
             # else, update displacement
             # TODO can create more accurate estimate by averaging past and new velocity (trapezoidal integration)
+            # can have negative velocity but doesn't mean it should affect displacement
+            # if 
             self.displacement += self.velocity * self.delta_t
-
             self.last_accel = acceleration
 
             # print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
-
-            self.velocities.append(self.velocity)
-            self.displacements.append(self.displacements)
 
             self.elevator_floor_pub.publish(self.current_floor)
 
@@ -167,8 +174,8 @@ def main():
         # process.publish_once_from_queue()
         r.sleep()
 
-    plot_array(process)
-    # lot_acceleration(process)
+    plot_accelerations(process)
+    plot_vel_displ(process)
 
 if __name__ == '__main__':
     main()
