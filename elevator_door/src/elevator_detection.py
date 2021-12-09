@@ -26,6 +26,7 @@ from door_state import ElevatorDoorTracker
 def get_camera_matrix(camera_info_msg):
     return np.array(camera_info_msg.K).reshape((3,3))
 
+
 class ElevatorImageProcess:
     """ 
     Wraps the processing of a pointcloud and RGB image, publishing
@@ -58,6 +59,9 @@ class ElevatorImageProcess:
         ts = message_filters.ApproximateTimeSynchronizer([points_sub, image_sub, caminfo_sub],
                                                           20, 0.1, allow_headerless=True)
         ts.registerCallback(self.sensor_callback)
+
+        # init service
+        rospy.Service('/calibrate_depth', Empty, self.reset_service_callback)
     
     def sensor_callback(self, points_msg, image, info):
         try:
@@ -117,7 +121,6 @@ if __name__ == '__main__':
     process = ElevatorImageProcess(POINTS_TOPIC, RGB_IMAGE_TOPIC,
                                 CAM_INFO_TOPIC, IMAGE_PUB_TOPIC,
                                 STATE_PUB_TOPIC)
-    rospy.Service('/calibrate_depth', Empty, process.reset_service_callback)
     r = rospy.Rate(100)  # 100 Hz
 
     while not rospy.is_shutdown():

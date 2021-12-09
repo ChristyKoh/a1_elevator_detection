@@ -121,7 +121,6 @@ class CheckElevatorFloorProcess:
             # can have negative velocity but doesn't mean it should affect displacement
             # if 
             self.displacement += self.velocity * self.delta_t
-            self.last_accel = acceleration
 
             # print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
 
@@ -155,7 +154,7 @@ class CheckElevatorFloorProcess:
     #     ani = animation.FuncAnimation(fig, animate, fargs=(xs,ys), interval=1000)
     #     plt.show()
 
-def main():
+if __name__ == '__main__':
     IMU_TOPIC = '/a1_states'
     IMU_MSG_TYPE = 'unitree_legged_msgs/HighState'
     ELEVATOR_FLOOR_TOPIC = 'elevator_floor'
@@ -168,8 +167,6 @@ def main():
     r = rospy.Rate(100)
     duration = 1
 
-    # only calculate velocity and displacement every 5 secs
-    # rospy.Timer(rospy.Duration(duration), process.publish_once_from_queue)
     while not rospy.is_shutdown():
         # process.publish_once_from_queue()
         r.sleep()
@@ -177,5 +174,3 @@ def main():
     plot_accelerations(process)
     plot_vel_displ(process)
 
-if __name__ == '__main__':
-    main()
