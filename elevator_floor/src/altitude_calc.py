@@ -48,6 +48,9 @@ def calc_vel_displacement(accelerations, delta_t):
     displacement = integrate.simps(cum_vel)
 
     return velocity, displacement
+    
+def calc_displ(velocities, delta_t):
+    return integrate.simps(velocities,dx =  delta_t) 
 
 # around 4/5 m: distance between floors
     
