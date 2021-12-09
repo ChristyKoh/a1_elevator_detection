@@ -1,157 +1,158 @@
-/*****************************************************************
- Copyright (c) 2020, Unitree Robotics.Co.Ltd. All rights reserved.
-******************************************************************/
+/************************************************************************
+Copyright (c) 2018-2019, Unitree Robotics.Co.Ltd. All rights reserved.
+Use of this source code is governed by the MPL-2.0 license, see LICENSE.
+************************************************************************/
 
+#include <ros/ros.h>
+#include <pthread.h>
+#include <string>
+#include <boost/thread.hpp>
+#include <boost/thread/mutex.hpp>
+#include <unitree_legged_msgs/HighCmd.h>
+#include <unitree_legged_msgs/HighState.h>
 #include "unitree_legged_sdk/unitree_legged_sdk.h"
-#include <math.h>
-#include <iostream>
-#include <unistd.h>
-#include <string.h>
+#include "aliengo_sdk/aliengo_sdk.hpp"
+#include "convert.h"
 
-using namespace UNITREE_LEGGED_SDK;
+// using namespace UNITREE_LEGGED_SDK;
 
-class Custom
+template<typename TLCM>
+void* update_loop(void* param)
 {
-public:
-    Custom(uint8_t level):
-      safe(LeggedType::A1),
-      udp(8080, "192.168.123.12", 8080, sizeof(HighCmd), sizeof(HighState))
-    {
-        udp.InitCmdData(cmd);
+    TLCM *data = (TLCM *)param;
+    while(ros::ok){
+        data->Recv();
+        usleep(2000);
     }
-    void UDPRecv();
-    void UDPSend();
-    void RobotControl();
-
-    Safety safe;
-    UDP udp;
-    HighCmd cmd = {0};
-    HighState state = {0};
-    int motiontime = 0;
-    float dt = 0.002;     // 0.001~0.01
-};
-
-
-void Custom::UDPRecv()
-{
-    udp.Recv();
 }
 
-void Custom::UDPSend()
+template<typename TCmd, typename TState, typename TLCM>
+int mainHelper(int argc, char *argv[], TLCM &roslcm)
 {
-    udp.Send();
-}
-
-void Custom::RobotControl()
-{
-    motiontime += 2;
-    udp.GetRecv(state);
-    printf("%d   %f\n", motiontime, state.imu.quaternion[2]);
-
-    cmd.mode = 0;      // 0:idle, default stand      1:forced stand     2:walk continuously
-    cmd.gaitType = 0;
-    cmd.speedLevel = 0;
-    cmd.footRaiseHeight = 0;
-    cmd.bodyHeight = 0;
-    cmd.euler[0]  = 0;
-    cmd.euler[1] = 0;
-    cmd.euler[2] = 0;
-    cmd.velocity[0] = 0.0f;
-    cmd.velocity[1] = 0.0f;
-    cmd.yawSpeed = 0.0f;
-    cmd.reserve = 0;
-
-    if(motiontime > 0 && motiontime < 1000){
-        cmd.mode = 1;
-        cmd.euler[0] = -0.3;
-    }
-    if(motiontime > 1000 && motiontime < 2000){
-        cmd.mode = 1;
-        cmd.euler[0] = 0.3;
-    }
-    if(motiontime > 2000 && motiontime < 3000){
-        cmd.mode = 1;
-        cmd.euler[1] = -0.2;
-    }
-    if(motiontime > 3000 && motiontime < 4000){
-        cmd.mode = 1;
-        cmd.euler[1] = 0.2;
-    }
-    if(motiontime > 4000 && motiontime < 5000){
-        cmd.mode = 1;
-        cmd.euler[2] = -0.2;
-    }
-    if(motiontime > 5000 && motiontime < 6000){
-        cmd.mode = 1;
-        cmd.euler[2] = 0.2;
-    }
-    if(motiontime > 6000 && motiontime < 7000){
-        cmd.mode = 1;
-        cmd.bodyHeight = -0.2;
-    }
-    if(motiontime > 7000 && motiontime < 8000){
-        cmd.mode = 1;
-        cmd.bodyHeight = 0.1;
-    }
-    if(motiontime > 8000 && motiontime < 9000){
-        cmd.mode = 1;
-        cmd.bodyHeight = 0.0;
-    }
-    if(motiontime > 9000 && motiontime < 11000){
-        cmd.mode = 5;
-    }
-    if(motiontime > 11000 && motiontime < 13000){
-        cmd.mode = 6;
-    }
-    if(motiontime > 13000 && motiontime < 14000){
-        cmd.mode = 0;
-    }
-    if(motiontime > 14000 && motiontime < 18000){
-        cmd.mode = 2;
-        cmd.gaitType = 2;
-        cmd.velocity[0] = 0.4f; // -1  ~ +1
-        cmd.yawSpeed = 2;
-        cmd.footRaiseHeight = 0.1;
-        // printf("walk\n");
-    }
-    if(motiontime > 18000 && motiontime < 20000){
-        cmd.mode = 0;
-        cmd.velocity[0] = 0;
-    }
-    if(motiontime > 20000 && motiontime < 24000){
-        cmd.mode = 2;
-        cmd.gaitType = 1;
-        cmd.velocity[0] = 0.2f; // -1  ~ +1
-        cmd.bodyHeight = 0.1;
-        // printf("walk\n");
-    }
-    if(motiontime>24000 ){
-        cmd.mode = 1;
-    }
-
-    udp.SetSend(cmd);
-}
-
-int main(void)
-{
-    std::cout << "Communication level is set to HIGH-level." << std::endl
-              << "WARNING: Make sure the robot is standing on the ground." << std::endl
+    std::cout << "WARNING: Control level is set to HIGH-level." << std::endl
+              << "Make sure the robot is standing on the ground." << std::endl
               << "Press Enter to continue..." << std::endl;
     std::cin.ignore();
 
-    Custom custom(HIGHLEVEL);
-    // InitEnvironment();
-    LoopFunc loop_control("control_loop", custom.dt,    boost::bind(&Custom::RobotControl, &custom));
-    LoopFunc loop_udpSend("udp_send",     custom.dt, 3, boost::bind(&Custom::UDPSend,      &custom));
-    LoopFunc loop_udpRecv("udp_recv",     custom.dt, 3, boost::bind(&Custom::UDPRecv,      &custom));
+    ros::NodeHandle n;
+    ros::Rate loop_rate(500);
 
-    loop_udpSend.start();
-    loop_udpRecv.start();
-    loop_control.start();
+    // SetLevel(HIGHLEVEL);
+    long motiontime = 0;
+    TCmd SendHighLCM = {0};
+    TState RecvHighLCM = {0};
+    unitree_legged_msgs::HighCmd SendHighROS;
+    unitree_legged_msgs::HighState RecvHighROS;
 
-    while(1){
-        sleep(10);
-    };
+    roslcm.SubscribeState();
 
+    pthread_t tid;
+    pthread_create(&tid, NULL, update_loop<TLCM>, &roslcm);
+
+    while (ros::ok()){
+        motiontime = motiontime+2;
+        roslcm.Get(RecvHighLCM);
+        RecvHighROS = ToRos(RecvHighLCM);
+        // printf("%f\n",  RecvHighROS.forwardSpeed);
+
+        SendHighROS.forwardSpeed = 0.0f;
+        SendHighROS.sideSpeed = 0.0f;
+        SendHighROS.rotateSpeed = 0.0f;
+        SendHighROS.bodyHeight = 0.0f;
+
+        SendHighROS.mode = 0;
+        SendHighROS.roll  = 0;
+        SendHighROS.pitch = 0;
+        SendHighROS.yaw = 0;
+
+        if(motiontime>1000 && motiontime<1500){
+            SendHighROS.mode = 1;
+            // SendHighROS.roll = 0.3f;
+        }
+
+        if(motiontime>1500 && motiontime<2000){
+            SendHighROS.mode = 1;
+            SendHighROS.pitch = 0.3f;
+        }
+
+        if(motiontime>2000 && motiontime<2500){
+            SendHighROS.mode = 1;
+            SendHighROS.yaw = 0.2f;
+        }
+
+        if(motiontime>2500 && motiontime<3000){
+            SendHighROS.mode = 1;
+            SendHighROS.bodyHeight = -0.3f;
+        }
+
+        if(motiontime>3000 && motiontime<3500){
+            SendHighROS.mode = 1;
+            SendHighROS.bodyHeight = 0.3f;
+        }
+
+        if(motiontime>3500 && motiontime<4000){
+            SendHighROS.mode = 1;
+            SendHighROS.bodyHeight = 0.0f;
+        }
+
+        if(motiontime>4000 && motiontime<5000){
+            SendHighROS.mode = 2;
+        }
+
+        if(motiontime>5000 && motiontime<8500){
+            SendHighROS.mode = 2;
+            SendHighROS.forwardSpeed = 0.1f; // -1  ~ +1
+        }
+
+        if(motiontime>8500 && motiontime<12000){
+            SendHighROS.mode = 2;
+            SendHighROS.forwardSpeed = -0.2f; // -1  ~ +1
+        }
+
+        if(motiontime>12000 && motiontime<16000){
+            SendHighROS.mode = 2;
+            SendHighROS.rotateSpeed = 0.1f;   // turn
+        }
+
+        if(motiontime>16000 && motiontime<20000){
+            SendHighROS.mode = 2;
+            SendHighROS.rotateSpeed = -0.1f;   // turn
+        }
+
+        if(motiontime>20000 && motiontime<21000){
+            SendHighROS.mode = 1;
+        }
+
+        SendHighLCM = ToLcm(SendHighROS, SendHighLCM);
+        roslcm.Send(SendHighLCM);
+        ros::spinOnce();
+        loop_rate.sleep(); 
+    }
     return 0;
+}
+
+int main(int argc, char *argv[]){
+    ros::init(argc, argv, "walk_ros_mode");
+    std::string firmwork;
+    ros::param::get("/firmwork", firmwork);
+
+    if(firmwork == "3_1"){
+        aliengo::Control control(aliengo::HIGHLEVEL);
+        aliengo::LCM roslcm;
+        mainHelper<aliengo::HighCmd, aliengo::HighState, aliengo::LCM>(argc, argv, roslcm);
+    }
+    else if(firmwork == "3_2"){
+        std::string robot_name;
+        UNITREE_LEGGED_SDK::LeggedType rname;
+        ros::param::get("/robot_name", robot_name);
+        if(strcasecmp(robot_name.c_str(), "A1") == 0)
+            rname = UNITREE_LEGGED_SDK::LeggedType::A1;
+        else if(strcasecmp(robot_name.c_str(), "Aliengo") == 0)
+            rname = UNITREE_LEGGED_SDK::LeggedType::Aliengo;
+
+        UNITREE_LEGGED_SDK::InitEnvironment();
+        UNITREE_LEGGED_SDK::LCM roslcm(UNITREE_LEGGED_SDK::HIGHLEVEL);
+        mainHelper<UNITREE_LEGGED_SDK::HighCmd, UNITREE_LEGGED_SDK::HighState, UNITREE_LEGGED_SDK::LCM>(argc, argv, roslcm);
+    }
+    
 }
