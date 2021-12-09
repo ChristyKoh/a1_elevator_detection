@@ -9,19 +9,21 @@ Functions to extract elevator acceleration and height
 # from numpy import floor
 import rospy
 import numpy as np
+from math import sqrt, exp, pi
 from scipy import integrate
 
 from unitree_legged_msgs.msg import HighState
 from sensor_msgs.msg import Imu
 from scipy.ndimage import gaussian_filter1d
 
+# NO LONGER USED
 def get_acceleration(high_state):
     ''' Returns time, acceleration at current state
     '''
     accelerometer = high_state.imu.accelerometer
 
     # TODO change 9.8 to calibration average
-    return 9.8 - accelerometer[2]
+    return 9.9 - accelerometer[2]
 
 # acceleration data
 
@@ -33,16 +35,16 @@ def started_moving(acceleration):
     
     return True
 
-def calc_vel_displacement(accelerations, times):
-    ''' Calculate if current velocity is 0 
+def calc_vel_displacement(accelerations, delta_t):
+    ''' Calculate velocity and displacement
     '''
     # print(accelerations, time_arr)
     smoothed = smooth_data(accelerations)
     
     # velocity = integrate.simps(accelerations,times)
     # cum_vel = integrate.cumtrapz(accelerations,times)
-    velocity = integrate.simps(accelerations, dx=.002)
-    cum_vel = integrate.cumtrapz(accelerations, dx=.002)
+    velocity = integrate.simps(accelerations, dx = delta_t)
+    cum_vel = integrate.cumtrapz(accelerations, dx = delta_t)
     displacement = integrate.simps(cum_vel)
 
     return velocity, displacement
@@ -55,5 +57,6 @@ def smooth_data(accelerations):
     return np.array(gaussian_filter1d(accelerations, 100))
 
 
-# class ElevatorFloorState
-# 
+def get_gaussian_filter(sigma, n):
+    r = range(-int(n/2),int(n/2)+1)
+    return [1 / (sigma * sqrt(2*pi)) * exp(-float(x)**2/(2*sigma**2)) for x in r]

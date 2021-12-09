@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Authors(s): Abigail Chin
+Authors(s): Abigail Chin, Christy Koh
 
 This file implements a ROS node that subscribes to /a1_states to get the imu data from the a1 unitree robot,
 and publishes to elevator_floor to notify which floor the guide dog is on. 
@@ -8,19 +8,21 @@ and publishes to elevator_floor to notify which floor the guide dog is on.
 Functions to extract elevator acceleration and height
 """
 from collections import deque
+from math import isnan
 import numpy as np
 import rospy
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from scipy import integrate
 
 from unitree_legged_msgs.msg import HighState
 from elevator_door.msg import ElevatorDoorState
-from sensor_msgs.msg import Imu
-from std_msgs.msg import Bool
-from diagnostic_msgs.msg import DiagnosticArray
+from std_msgs.msg import Bool, UInt8
+
+from elevator_floor.srv import FloorSetting
+from std_srvs.srv import Empty, EmptyResponse
 
 import altitude_calc as ac
+from plotting import *
 
 
 class CheckElevatorFloorProcess:
@@ -28,49 +30,82 @@ class CheckElevatorFloorProcess:
     Wraps processing of imu data from input ros topic and publishing to elevator_floor topic
     '''
 
-    def __init__(self, a1_states, floor_node, elevator_door, diagnostic_node):
+    def __init__(self, a1_states, floor_pub_topic, queue_len=101):
 
         self.num_steps = 0
-        self.is_moving = False
-        self.forward_velocity = 0.0
+
+        # GRAPHING VARS
+        self.accelerations_noisy = []
         self.accelerations = []
         self.time_arr = []
         self.door_states = []
+        self.velocities = []
+        self.displacements = []
 
         # CONSTANTS
         self.floor_height = 6 # TODO change estimate
+        self.zero_a_threshold = 0.001
+
+        # SIGNAL PROCESSING
+        sigma = int((queue_len + 1) / 6)
+        self.gaussian = ac.get_gaussian_filter(sigma, queue_len)
+        self.raw_accels = deque([], queue_len)
+
+        self.accel_offset = 9.9 # acceleration due to gravity
 
         # VARIABLES
         self.current_floor = 1 # TODO write service to set current floor
-        self.past_accels = deque([], 100)
+        self.acceleration = 9.8
         self.velocity = 0.0
         self.displacement = 0.0
-        self.delta_t = 0.002
-        
-        # messages as deque (with max length = 5) instead of list?
+        self.delta_t = 0.0025 # 0.002 for 500 Hz
         self.messages = []
+
         a1_sub = rospy.Subscriber(a1_states, HighState, self.a1_state_callback)
       
-        self.elevator_floor_pub = rospy.Publisher(
-            floor_node, Bool, queue_size=10)
+        self.elevator_floor_pub = rospy.Publisher(floor_pub_topic, UInt8, queue_size=10)
+
+    def calibrate_offset(self, msg):
+        # set acceleration to mean of raw accelerations
+        self.accel_offset = np.mean(self.raw_accels)
+        
+        if isnan(self.accel_offset):
+            self.accel_offset = 9.9
+            print("failed calibration: raw_accels mean is nan")
+        else:
+            # reset vars
+            self.velocity = 0.0
+            self.displacement = 0.0
+            print("calibrated offset to %.3f" % self.accel_offset)
+        return EmptyResponse()
 
     def a1_state_callback(self, high_state):
+
         try:
-            acceleration = ac.get_acceleration(high_state)
-            # is the time the rospy time of the bag file?
-            # time =  rospy.Time.now() 
+            z_accel = high_state.imu.accelerometer[2]
 
             # for graphing entire sequence
             self.time_arr.append(rospy.get_time())
-            self.accelerations.append(acceleration)
+            self.raw_accels.append(z_accel)
+            self.accelerations_noisy.append(z_accel)
             self.num_steps += 1
+            
+            acceleration = np.matmul(self.gaussian, self.raw_accels) - self.accel_offset
 
-            # TODO apply gaussian 
+            # check if accel is 'close enough' to 0
+            if abs(np.mean(self.raw_accels) - self.accel_offset) <= self.zero_a_threshold:
+                # if so, reset velocity and displacement to 0 bc elevator stopped.
+                acceleration = 0.0
+                floor_diff = round(self.displacement / self.floor_height)
+                self.current_floor += floor_diff
+                print("%d floors traversed, curr floor %d." % (floor_diff, self.current_floor)) 
+                # reset displacement
+                print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
+                self.displacement = 0.0
+
+            self.accelerations.append(acceleration)
+            
             self.velocity += acceleration * self.delta_t
-
-            # check if velocity is 'close enough' to 0
-            # if so, reset velocity and displacement to 0 bc elevator stopped.
-                # calculate - round(curr_displ / floor_height) == number of floors traversed
 
             # else, update displacement
             # TODO can create more accurate estimate by averaging past and new velocity (trapezoidal integration)
@@ -78,66 +113,24 @@ class CheckElevatorFloorProcess:
 
             self.last_accel = acceleration
 
-            print("Velocity: %.3f" % self.velocity)
-            print("Displacement: %.3f" %self.displacement)
+            # print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
 
-            # TODO publish 
+            self.velocities.append(self.velocity)
+            self.displacements.append(self.displacements)
+
+            self.elevator_floor_pub.publish(self.current_floor)
 
             # print('Acceleration: '+ str(acceleration))
             # self.animate(acceleration,time)
         except Exception as e:
             rospy.logerr(e)
             return
-        
-        self.messages.append([acceleration, rospy.get_time()])
 
-    def publish_once_from_queue(self, event):
-        
-        if self.messages:
-            # let's just publish after after not_moving->not_moving time period
-            accelerations = []
-            times = []
-            for each in self.messages:
-                accelerations.append(each[0])
-                times.append(each[1])
-            
-            self.messages = []
-            
-            # sduration = (time - self.time_arr[-1]).toSec()
-            try:
-                # if not self.is_moving:
-                # 100 Hz / sample len(a) = time (s)
-                vel,dist = ac.calc_vel_displacement(accelerations, times)
-                print('Velocity: ' + str(vel))
-                print('Distance: ' + str(dist))
-            except Exception as e:
-                print(e)
-                return
+    def set_current_floor_callback(self, floor):
+        # need mutex to handle multithreading?
+        self.current_floor = floor
+        return self.current_floor
 
-            self.elevator_floor_pub.publish(False)
-            # print("Published floor msg at timestamp:",
-            #       floor.header.stamp.secs)
-
-def plot_acceleration(process):
-    data = np.array(process.accelerations)
-    # times = np.array(process.time_arr[:len(data)]) - rospy.Time()
-    # times = np.array(list(map(lambda x: x.secs, times)))
-   
-    smooth_data = ac.smooth_data(process.accelerations)
-    # infls = np.where(np.diff(np.sign(smooth_data)))[0]
-    plt.plot(data, label='Noisy Data')
-    plt.plot(smooth_data, label='Smooth Data')
-    # velocity = integrate.simps(smooth_data)
-    # distance = integrate.simps(velocity)
-    
-    # print(velocity)
-    # print(distance)
-    # plt.plot(velocity, label='Velocity')
-    # plt.plot(distance, label='Distance')
-    # for i, infl in enumerate(infls,1):
-    #     plt.axvline(x=infl, color='k',label='Inflection point %d'%(i))
-    plt.legend()
-    plt.show()
 
  # def animate(i, xs, ys):
         
@@ -156,14 +149,14 @@ def plot_acceleration(process):
     #     plt.show()
 
 def main():
-    IMU_NODE = '/a1_states'
+    IMU_TOPIC = '/a1_states'
     IMU_MSG_TYPE = 'unitree_legged_msgs/HighState'
-    ELEVATOR_FLOOR_NODE = 'elevator_floor'
-    ELEVATOR_DOOR_NODE = 'elevator_door'
-    DIAGNOSTIC_NODE = '/diagnostics'
+    ELEVATOR_FLOOR_TOPIC = 'elevator_floor'
 
     rospy.init_node('elevator_floor', anonymous=True)
-    process = CheckElevatorFloorProcess(IMU_NODE, ELEVATOR_FLOOR_NODE, ELEVATOR_DOOR_NODE, DIAGNOSTIC_NODE)
+    process = CheckElevatorFloorProcess(IMU_TOPIC, ELEVATOR_FLOOR_TOPIC)
+    rospy.Service('/elevator/set_current_floor', FloorSetting, process.set_current_floor_callback)
+    rospy.Service('/elevator/calibrate_acceleration', Empty, process.calibrate_offset)
 
     r = rospy.Rate(100)
     duration = 1
@@ -174,7 +167,8 @@ def main():
         # process.publish_once_from_queue()
         r.sleep()
 
-    plot_acceleration(process)
+    plot_array(process)
+    # lot_acceleration(process)
 
 if __name__ == '__main__':
     main()
