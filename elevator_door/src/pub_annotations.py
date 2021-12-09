@@ -7,6 +7,7 @@ import rospy
 import numpy as np
 import ros_numpy
 import tf
+import cv2
 
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from elevator_door.msg import ElevatorDoorState
