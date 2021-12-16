@@ -12,9 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sensor_msgs
   std_msgs
-  unitree_legged_msgs
+ # unitree_legged_msgs
   diagnostic_msgs
-  elevator_door
 )
 
 ## System dependencies are found with CMake's conventions

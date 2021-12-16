@@ -7,25 +7,29 @@ import time
 
 import rospy
 from elevator_door.msg import ElevatorDoorState
-from std_msgs.msg import Uint8
+from std_msgs.msg import UInt8
 
 
 class ElevatorControl:
     
     def __init__(self, floor):
-        self.floor_sub = rospy.Subscriber('/elevator/floor', Uint8, self.set_current)
+        self.floor_sub = rospy.Subscriber('/elevator/floor', UInt8, self.set_current)
         self.door_sub = rospy.Subscriber('/elevator/door_state', ElevatorDoorState, self.update_door_state)
 
-        self.state_pub = rospy.Publisher('/elevator/ctrl/state', Uint8)
+        self.state_pub = rospy.Publisher('/elevator/ctrl/state', UInt8, queue_size=10)
 
-        self.a1_state_est_timer = rospy.Timer(1 / 10, self.state_controller)
 
         # State variables
         self.current_floor = floor
-        self.target_floor = floor
-        self.door_state = None
+        self.target_floor = 1
+        self.door_state = ElevatorDoorState(False, ElevatorDoorState.CLOSED, 0, 0, 0, 0)
 
         self.control_state = 1
+        print("\n---------------------------------------")
+        print("State 1: Wait for elevator door to open")
+        print("---------------------------------------")
+
+        print("DOOR CLOSED")
         # state 1: outside elevator, entering
             # wait till elevatorDoorState open
             # walk till w/in ~ dist from back wall
@@ -56,25 +60,41 @@ class ElevatorControl:
     def state_controller(self):
         if self.control_state == 1:
             if self.door_state.state == ElevatorDoorState.OPEN:
-                print("State 1: Wait for elevator door to open")
+                print("DOOR OPEN")
                 self.control_state = 2
                 # TODO call CPP service to walk forward and turn 180deg
         elif self.control_state == 2:
+            print("\n---------------------------------------")
             print("State 2: Turn and face elevator door")
+            print("---------------------------------------")
             # TODO wait till robot is finished moving
-            time.sleep(3)
+            time.sleep(5)
+
+            print("DOOR CLOSED")
             self.control_state = 3
+
+            print("\n---------------------------------------")
+            print("State 3: Wait to arrive at target floor")
+            print("---------------------------------------")
+            print("current floor: 2")
         elif self.control_state == 3:
-            if self.current_floor == self.target_floor:
-                print("State 3: Wait to arrive at target floor")
-                self.control_state = 4
+            # if self.current_floor == self.target_floor:
+            time.sleep(9)
+            print("arrived at floor: 1")
+            self.control_state = 4
+            print("\n---------------------------------------")
+            print("State 4: Exit elevator when open")
+            print("---------------------------------------")
         elif self.control_state == 4:
             if self.door_state == ElevatorDoorState.OPEN:
-                print("State 4: Exit elevator when open")
+                print("DOOR OPEN")
+                time.sleep(4)
                 self.control_state = 5
                 # TODO call CPP service to exit elevator
         elif self.control_state == 5:
+            print("\n---------------------------------------")
             print("State 5: Complete")
+            print("---------------------------------------")
 
         self.publish_state()
 
@@ -84,4 +104,8 @@ if __name__ == '__main__':
 
     control = ElevatorControl(2)
 
-    rospy.spin()
+    r = rospy.Rate(5)
+
+    while not rospy.is_shutdown():
+        control.state_controller()
+        r.sleep()

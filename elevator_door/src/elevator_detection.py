@@ -101,7 +101,7 @@ class ElevatorImageProcess:
 
             door_state = self.state_tracker.process_state(points, image, info,
                 np.array(trans), np.array(rot), print_state=False)
-            # self.state_tracker.publish_annotated_image()
+            self.state_tracker.publish_annotated_image()
 
             # publish door state
             self.state_pub.publish(door_state)

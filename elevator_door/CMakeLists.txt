@@ -130,11 +130,6 @@ link_directories($ENV{ALIENGO_SDK_PATH}/lib)
 string(CONCAT LEGGED_SDK_NAME libunitree_legged_sdk_$ENV{UNITREE_PLATFORM}.so)
 set(EXTRA_LIBS ${LEGGED_SDK_NAME} libaliengo_comm.so lcm)
 
-
-# add_executable(walk_lcm src/exe/walk_mode.cpp)
-# target_link_libraries(walk_lcm ${EXTRA_LIBS} ${catkin_LIBRARIES})
-# add_dependencies(walk_lcm ${${PEOJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
@@ -157,8 +152,8 @@ add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catk
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(${PROJECT_NAME}_node
-  ${catkin_LIBRARIES} 
   ${EXTRA_LIBS}
+  ${catkin_LIBRARIES} 
 )
 
 #############
