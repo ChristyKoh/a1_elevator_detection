@@ -15,10 +15,18 @@ Use of this source code is governed by the MPL-2.0 license, see LICENSE.
 #include "convert.h"
 
 // using namespace UNITREE_LEGGED_SDK;
+
 class CmdClass {
-    unitree_legged_msgs::HighCmd lastCmd;
-    boost::mutex mutex;
-}
+    public:
+        CmdClass();
+
+        void CmdCallback(unitree_legged_msgs::HighCmd);
+        
+        unitree_legged_msgs::HighCmd Read();
+
+        unitree_legged_msgs::HighCmd lastCmd;
+        boost::mutex mutex;
+};
 
 /** Class constructor. */
 CmdClass::CmdClass()
@@ -34,22 +42,19 @@ CmdClass::CmdClass()
     lastCmd.yaw = 0;
 }
 
-/** Class destructor. */
-CmdClass::~CmdClass()
-{}
-
-/** Callback to update lastCmd. */
-void CmdClass::cmdCallback(unitree_legged_msgs::HighCmd newCmd)
+/** Updates lastCmd. */
+void CmdClass::CmdCallback(unitree_legged_msgs::HighCmd newCmd)
 {
-    mutex.lock()
+    mutex.lock();
     lastCmd = newCmd;
-    mutex.unlock()
+    mutex.unlock();
 }
 
-void CmdClass::read()
+/** Reads lastCmd. */
+unitree_legged_msgs::HighCmd CmdClass::Read()
 {
     boost::lock_guard<boost::mutex> lock{mutex};
-    return lastCmd
+    return lastCmd;
 }
 
 template<typename TLCM>
@@ -60,7 +65,7 @@ void* update_loop(void* param)
         data->Recv();
         usleep(2000);
     }
-}
+};
 
 template<typename TCmd, typename TState, typename TLCM>
 int mainHelper(int argc, char *argv[], TLCM &roslcm)
@@ -75,7 +80,7 @@ int mainHelper(int argc, char *argv[], TLCM &roslcm)
     ros::Publisher pub_states = n.advertise<unitree_legged_msgs::HighState>("/a1_states", 500);
 
     CmdClass cmd_obj;
-    ros::Subscriber sub_cmd = n.subscribe("/elevator/ctrl/highcmd", 10, &CmdClass::cmdCallback, &cmd_obj);
+    ros::Subscriber sub_cmd = n.subscribe("/elevator/ctrl/highcmd", 10, &CmdClass::CmdCallback, &cmd_obj);
 
     // SetLevel(HIGHLEVEL);
     long motiontime = 0;
@@ -94,11 +99,11 @@ int mainHelper(int argc, char *argv[], TLCM &roslcm)
         motiontime = motiontime+2;
         roslcm.Get(RecvHighLCM);
         RecvHighROS = ToRos(RecvHighLCM);
-        RecvHighROS.stamp = time;
+        // RecvHighROS.stamp = time;
         pub_states.publish(RecvHighROS);
-        // printf("%f\n",  RecvHighROS.forwardSpeed);
 
-        lastCmd = cmd_obj::read();
+        lastCmd = cmd_obj.Read();
+        printf("%d %.3f %.3f\n",  lastCmd.mode, lastCmd.forwardSpeed, lastCmd.rotateSpeed);
         SendHighLCM = ToLcm(lastCmd, SendHighLCM);
         roslcm.Send(SendHighLCM);
         ros::spinOnce();

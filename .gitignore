@@ -1,3 +1,4 @@
 CMakeLists.txt
 package.xml
 *.pyc
+bagfiles/*
