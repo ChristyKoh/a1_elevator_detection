@@ -20,7 +20,7 @@ ROTATE_GOAL = 3.14  # rad
 class ElevatorControl:
     
     def __init__(self, current_floor, target_floor, ctrl_state):
-        self.floor_sub = rospy.Subscriber('/elevator/floor', UInt8, self.set_current_floor)
+        self.floor_sub = rospy.Subscriber('/elevator_floor', UInt8, self.set_current_floor)
         self.door_sub = rospy.Subscriber('/elevator/door_state', ElevatorDoorState, self.update_door_state)
         self.a1_state_sub = rospy.Subscriber('/a1_states', HighState, self.update_a1_state)
         self.depth_sub = rospy.Subscriber('/elevator/avg_depth', Float64, self.update_depth)
@@ -148,14 +148,14 @@ class ElevatorControl:
         elif self.control_state == ControlState.TURNING_TO_DOOR:
             print("yaw: %.3f" % self.yaw)
             error = ROTATE_GOAL - self.yaw
-            if error > 0.1:
+            if error > 0.05:
                 self.command_rotate(error * self.rot_kP)
             else:
                 print("TURNED 180 DEGREES.")
                 # TODO Check if robot has rotated 180 degrees
                 # transition: enter joint locked mode and calibrate depth
                 self.command_stop()
-                self.print_depth = True
+                self.print_depth = False
                 time.sleep(1)
                 self.calibrate_depth()
                 time.sleep(1)
@@ -181,12 +181,15 @@ class ElevatorControl:
 
 if __name__ == '__main__':
     rospy.init_node('elevator_control')
-    current_floor = rospy.get_param('~curr_floor', 2)
-    target_floor = rospy.get_param('~taret_floor', 1)
+    current_floor = rospy.get_param('current_floor', 2)
+    target_floor = rospy.get_param('~target_floor', 1)
     init_state = rospy.get_param('~init_state', 1)
     rospy.loginfo('Parameter %s has value %s', rospy.resolve_name('~init_state'), init_state)
 
-    control = ElevatorControl(2, 1, ControlState(init_state))
+
+    # print(current_floor, target_floor, init_state)
+
+    control = ElevatorControl(current_floor, target_floor, ControlState(init_state))
 
     r = rospy.Rate(10)
 

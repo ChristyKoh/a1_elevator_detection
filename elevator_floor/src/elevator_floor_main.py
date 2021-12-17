@@ -30,7 +30,7 @@ class CheckElevatorFloorProcess:
     Wraps processing of imu data from input ros topic and publishing to elevator_floor topic
     '''
 
-    def __init__(self, a1_states, floor_pub_topic, queue_len=101):
+    def __init__(self, current_floor, a1_state_topic, floor_pub_topic, queue_len=101):
 
         self.num_steps = 0
 
@@ -54,14 +54,14 @@ class CheckElevatorFloorProcess:
         self.accel_offset = 9.9 # acceleration due to gravity
 
         # VARIABLES
-        self.current_floor = 1 # TODO write service to set current floor
+        self.current_floor = current_floor
         self.acceleration = 9.8 # should this be 9.9?
         self.velocity = 0.0
         self.displacement = 0.0
         self.delta_t = 0.0025 # 0.002 for 500 Hz
         self.messages = []
 
-        a1_sub = rospy.Subscriber(a1_states, HighState, self.a1_state_callback)
+        a1_sub = rospy.Subscriber(a1_state_topic, HighState, self.a1_state_callback)
       
         self.elevator_floor_pub = rospy.Publisher(floor_pub_topic, UInt8, queue_size=10)
 
@@ -89,6 +89,9 @@ class CheckElevatorFloorProcess:
             self.raw_accels.append(z_accel)
             self.accelerations_noisy.append(z_accel)
             self.num_steps += 1
+
+            if len(self.raw_accels) < 101:
+                return
             
             acceleration = np.matmul(self.gaussian, self.raw_accels) - self.accel_offset
 
@@ -119,7 +122,6 @@ class CheckElevatorFloorProcess:
             # else, update displacement
             # TODO can create more accurate estimate by averaging past and new velocity (trapezoidal integration)
             # can have negative velocity but doesn't mean it should affect displacement
-            # if 
             self.displacement += self.velocity * self.delta_t
 
             # print("a: %.3f  v: %.3f  d: %.3f" % (self.last_accel, self.velocity, self.displacement))
@@ -134,37 +136,23 @@ class CheckElevatorFloorProcess:
 
     def set_current_floor_callback(self, floor):
         # need mutex to handle multithreading?
-        self.current_floor = floor
+        self.current_floor = floor.floor
         return self.current_floor
 
-
- # def animate(i, xs, ys):
-        
-    #     ys = ys[-20:]
-    #     xs = xs[-20:]
-
-    #     ax.clear()
-    #     ax.plot(xs, ys)
-
-    #     plt.xticks(rotation=45, ha='right')
-    #     plt.subplots_adjust(bottom=0.3)
-    #     plt.title('Accelerations over Time')
-    #     plt.ylabel('Acceleration (m/s^2)')
-
-    #     ani = animation.FuncAnimation(fig, animate, fargs=(xs,ys), interval=1000)
-    #     plt.show()
 
 if __name__ == '__main__':
     IMU_TOPIC = '/a1_states'
     IMU_MSG_TYPE = 'unitree_legged_msgs/HighState'
     ELEVATOR_FLOOR_TOPIC = 'elevator_floor'
 
+    current_floor = rospy.get_param('current_floor', 2)
+
     rospy.init_node('elevator_floor', anonymous=True)
-    process = CheckElevatorFloorProcess(IMU_TOPIC, ELEVATOR_FLOOR_TOPIC)
+    process = CheckElevatorFloorProcess(current_floor, IMU_TOPIC, ELEVATOR_FLOOR_TOPIC)
     rospy.Service('/elevator/set_current_floor', FloorSetting, process.set_current_floor_callback)
     rospy.Service('/elevator/calibrate_acceleration', Empty, process.calibrate_offset)
 
-    r = rospy.Rate(100)
+    r = rospy.Rate(10)
     duration = 1
 
     while not rospy.is_shutdown():

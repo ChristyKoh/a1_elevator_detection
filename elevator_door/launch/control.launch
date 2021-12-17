@@ -1,0 +1,9 @@
+<launch>
+    <param name="current_floor" value="3"/>
+    <node name="elevator_detection" pkg="elevator_door" type="elevator_detection.py" />
+    <node name="elevator_floor" pkg="elevator_floor" type="elevator_floor_main.py" />
+    <node name="elevator_control" pkg="elevator_door" type="elevator_control.py">
+        <param name="target_floor" value="4"/>
+        <param name="init_state" value="2"/>
+    </node>
+</launch>

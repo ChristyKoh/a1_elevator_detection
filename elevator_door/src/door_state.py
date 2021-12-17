@@ -110,7 +110,7 @@ class ElevatorDoorTracker:
         self.vertical_edges = get_vertical_edges(image)
         self.vertical_edges.append(640) # always include rightmost edge
 
-        print(self.vertical_edges)
+        # print(self.vertical_edges)
 
         in_window = ((i, points[i]) for i, pt in enumerate(pixel_coords.T) 
                                     if midpt <= pt[0] < right)

@@ -103,7 +103,7 @@ int mainHelper(int argc, char *argv[], TLCM &roslcm)
         pub_states.publish(RecvHighROS);
 
         lastCmd = cmd_obj.Read();
-        printf("%d %.3f %.3f\n",  lastCmd.mode, lastCmd.forwardSpeed, lastCmd.rotateSpeed);
+        // printf("%d %.3f %.3f\n",  lastCmd.mode, lastCmd.forwardSpeed, lastCmd.rotateSpeed);
         SendHighLCM = ToLcm(lastCmd, SendHighLCM);
         roslcm.Send(SendHighLCM);
         ros::spinOnce();
