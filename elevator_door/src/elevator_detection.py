@@ -17,11 +17,13 @@ import ros_numpy
 import tf
 
 from std_srvs.srv import Empty, EmptyResponse
+from std_msgs.msg import Float64
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from elevator_door.msg import ElevatorDoorState
 import matplotlib.pyplot as plt
 
 from door_state import ElevatorDoorTracker
+
 
 def get_camera_matrix(camera_info_msg):
     return np.array(camera_info_msg.K).reshape((3,3))
@@ -38,6 +40,7 @@ class ElevatorImageProcess:
                 image_sub_topic,
                 cam_info_topic, 
                 image_pub_topic,
+                depth_pub_topic,
                 state_pub_topic):
         
         self.messages = deque([], 5)
@@ -53,7 +56,8 @@ class ElevatorImageProcess:
         self.listener = tf.TransformListener()
         
         # init publishers
-        self.state_pub = rospy.Publisher(state_pub_topic, ElevatorDoorState, queue_size=10)
+        self.state_pub = rospy.Publisher(state_pub_topic, ElevatorDoorState, queue_size=1)
+        self.avg_depth_pub = rospy.Publisher(depth_pub_topic, Float64, queue_size=1)
         
         # synchronize input from all three subscribers
         ts = message_filters.ApproximateTimeSynchronizer([points_sub, image_sub, caminfo_sub],
@@ -106,6 +110,9 @@ class ElevatorImageProcess:
             # publish door state
             self.state_pub.publish(door_state)
 
+            # publish avg depth
+            self.avg_depth_pub.publish(np.average(points['z']))
+
 
 if __name__ == '__main__':
     CAM_INFO_TOPIC = '/camera/color/camera_info'
@@ -113,6 +120,7 @@ if __name__ == '__main__':
     DEPTH_IMAGE_TOPIC = '/camera/depth/image_rect_raw'
     POINTS_TOPIC = '/camera/depth/color/points'
     IMAGE_PUB_TOPIC = '/elevator/image'
+    AVG_DEPTH_PUB_TOPIC = '/elevator/avg_depth'
     STATE_PUB_TOPIC = '/elevator/door_state'
 
     print("initializing node")
@@ -120,7 +128,7 @@ if __name__ == '__main__':
     print("initializing process")
     process = ElevatorImageProcess(POINTS_TOPIC, RGB_IMAGE_TOPIC,
                                 CAM_INFO_TOPIC, IMAGE_PUB_TOPIC,
-                                STATE_PUB_TOPIC)
+                                AVG_DEPTH_PUB_TOPIC, STATE_PUB_TOPIC)
     r = rospy.Rate(100)  # 100 Hz
 
     while not rospy.is_shutdown():

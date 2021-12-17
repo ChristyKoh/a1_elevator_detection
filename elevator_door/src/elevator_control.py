@@ -6,106 +6,149 @@ Controller node to handle elevator entry/exit pipeline.
 import time
 
 import rospy
+from a1_control_states import *
+
 from elevator_door.msg import ElevatorDoorState
-from std_msgs.msg import UInt8
+from std_msgs.msg import UInt8, Float64
+from unitree_legged_msgs.msg import HighCmd, HighState
+from std_srvs.srv import Empty
+
+DEPTH_THRESHOLD = 600  # in pointcloud units
 
 
 class ElevatorControl:
     
-    def __init__(self, floor):
-        self.floor_sub = rospy.Subscriber('/elevator/floor', UInt8, self.set_current)
+    def __init__(self, floor, ctrl_state):
+        self.floor_sub = rospy.Subscriber('/elevator/floor', UInt8, self.set_current_floor)
         self.door_sub = rospy.Subscriber('/elevator/door_state', ElevatorDoorState, self.update_door_state)
+        self.a1_state_sub = rospy.Subscriber('/a1_states', HighState, self.update_a1_state)
+        self.depth_sub = rospy.Subscriber('/elevator/avg_depth', Float64, self.update_depth)
 
-        self.state_pub = rospy.Publisher('/elevator/ctrl/state', UInt8, queue_size=10)
+        self.state_pub = rospy.Publisher('/elevator/ctrl/state', UInt8, queue_size=1)
+        self.cmd_pub = rospy.Publisher('/elevator/ctrl/highcmd', HighCmd, queue_size=10)
 
+        self.calibrate_depth = rospy.ServiceProxy('/calibrate_depth', Empty)
 
         # State variables
         self.current_floor = floor
         self.target_floor = 1
-        self.door_state = ElevatorDoorState(False, ElevatorDoorState.CLOSED, 0, 0, 0, 0)
+        self.view_depth = 0.0  # avg depth of Realsense PointCloud
+        self.door_state = ElevatorDoorState()
+        self.high_state = HighState()
 
-        self.control_state = 1
-        print("\n---------------------------------------")
-        print("State 1: Wait for elevator door to open")
-        print("---------------------------------------")
+        self.control_state = ctrl_state
+        print_state(self.control_state)
 
-        print("DOOR CLOSED")
-        # state 1: outside elevator, entering
-            # wait till elevatorDoorState open
-            # walk till w/in ~ dist from back wall
-        # state 2: inside elevator, facing wall
-            # turn 180deg
-        # state 3: inside elevator, facing door
-            # wait till elevatorDoorState open
-            # wait till floor is target_floor
-            # repeat
-        # state 4: inside elevator
-            # wait till elevatorDoorState open
-            # walk outside for set amount of time
-        # state 5: outside elevator, exited
-            # wait for global/local planner
+        self.is_complete = False
+
+    # -------- INSTANCE SETTER METHODS --------
 
     def update_door_state(self, door_state):
         self.door_state = door_state
 
-    def set_target(self, floor):
+    def update_a1_state(self, high_state):
+        self.high_state = high_state
+        print("gyro: ", self.high_state.imu.gyroscope)
+
+    def update_depth(self, depth):
+        self.view_depth = depth
+        print("depth: ", self.view_depth)
+
+    def set_target_floor(self, floor):
         self.target_floor = floor
 
-    def set_current(self, floor):
+    def set_current_floor(self, floor):
         self.current_floor = floor
+
+    # ------- PUBLISHING METHODS --------
 
     def publish_state(self):
         self.state_pub.publish(self.control_state)
 
+    def command_stop(self):
+        cmd = HighCmd()
+        cmd.mode = 1
+        self.cmd_pub.publish(cmd)
+
+    def command_rotate(self, rot_speed):
+        cmd = HighCmd()
+        cmd.mode = 2
+        cmd.rotateSpeed = rot_speed
+        self.cmd_pub.publish(cmd)
+
+    def command_side(self, side_speed):
+        cmd = HighCmd()
+        cmd.mode = 2
+        cmd.sideSpeed = side_speed
+        self.cmd_pub.publish(cmd)
+
+    def command_fwd(self, fwd_speed):
+        cmd = HighCmd()
+        cmd.mode = 2
+        cmd.forwardSpeed = fwd_speed
+        self.cmd_pub.publish(cmd)
+
+    def publish_highcmd(self, cmd):
+        self.cmd_pub.publish(cmd)
+
+    # -------- STATE MACHINE LOOP --------
+
     def state_controller(self):
-        if self.control_state == 1:
+        if self.control_state == ControlState.OUTSIDE_WAITING:
+            # wait until door open
             if self.door_state.state == ElevatorDoorState.OPEN:
                 print("DOOR OPEN")
-                self.control_state = 2
-                # TODO call CPP service to walk forward and turn 180deg
-        elif self.control_state == 2:
-            print("\n---------------------------------------")
-            print("State 2: Turn and face elevator door")
-            print("---------------------------------------")
-            # TODO wait till robot is finished moving
-            time.sleep(5)
-
-            print("DOOR CLOSED")
-            self.control_state = 3
-
-            print("\n---------------------------------------")
-            print("State 3: Wait to arrive at target floor")
-            print("---------------------------------------")
-            print("current floor: 2")
-        elif self.control_state == 3:
-            # if self.current_floor == self.target_floor:
-            time.sleep(9)
-            print("arrived at floor: 1")
-            self.control_state = 4
-            print("\n---------------------------------------")
-            print("State 4: Exit elevator when open")
-            print("---------------------------------------")
-        elif self.control_state == 4:
+                # transition: start entering
+                self.command_fwd(0.2)
+                self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.ENTERING:
+            # walk until pointcloud estimate
+            if self.depth_sub < DEPTH_THRESHOLD:
+                # transition: stop moving
+                self.command_stop()
+                # TODO initiate button press
+                self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.PRESSING_BUTTON:
+            print("target floor: ", self.target_floor)
+            # transition: rotate to face door
+            self.command_rotate(0.2)
+            self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.TURNING_TO_DOOR:
+            if False:
+                # TODO Check if robot has rotated 180 degrees
+                # transition: enter joint locked mode and calibrate depth
+                self.command_stop()
+                time.sleep(1)
+                self.calibrate_depth()
+                time.sleep(1)
+                self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.INSIDE_WAITING:
+            if self.current_floor == self.target_floor:
+                print("arrived at floor: ", self.current_floor)
+                # transition: start exiting
+                self.command_fwd(0.2)
+                self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.EXITING:
             if self.door_state == ElevatorDoorState.OPEN:
                 print("DOOR OPEN")
-                time.sleep(4)
-                self.control_state = 5
-                # TODO call CPP service to exit elevator
-        elif self.control_state == 5:
-            print("\n---------------------------------------")
-            print("State 5: Complete")
-            print("---------------------------------------")
+                # transition: stop movement
+                self.command_stop()
+                self.control_state = self.control_state.next()
+        elif self.control_state == ControlState.COMPLETE:
+            self.is_complete = True
 
         self.publish_state()
 
 
 if __name__ == '__main__':
     rospy.init_node('elevator_control')
+    init_state = rospy.get_param('~init_state', 1)
+    rospy.loginfo('Parameter %s has value %s', rospy.resolve_name('~init_state'), init_state)
 
-    control = ElevatorControl(2)
+    control = ElevatorControl(2, ControlState(init_state))
 
-    r = rospy.Rate(5)
+    r = rospy.Rate(10)
 
-    while not rospy.is_shutdown():
+    while not rospy.is_shutdown() and not control.is_complete:
         control.state_controller()
         r.sleep()
