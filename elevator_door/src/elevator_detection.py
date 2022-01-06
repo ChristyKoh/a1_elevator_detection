@@ -22,7 +22,7 @@ from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from elevator_door.msg import ElevatorDoorState
 import matplotlib.pyplot as plt
 
-from door_state import ElevatorDoorTracker
+from elevator_door_tracker import ElevatorDoorTracker
 
 
 def get_camera_matrix(camera_info_msg):
@@ -123,9 +123,8 @@ if __name__ == '__main__':
     AVG_DEPTH_PUB_TOPIC = '/elevator/avg_depth'
     STATE_PUB_TOPIC = '/elevator/door_state'
 
-    print("initializing node")
+    print("initializing elevator door detection node")
     rospy.init_node('elevator_node')
-    print("initializing process")
     process = ElevatorImageProcess(POINTS_TOPIC, RGB_IMAGE_TOPIC,
                                 CAM_INFO_TOPIC, IMAGE_PUB_TOPIC,
                                 AVG_DEPTH_PUB_TOPIC, STATE_PUB_TOPIC)

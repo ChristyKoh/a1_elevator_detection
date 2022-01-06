@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Authors(s): Christy Koh
-Functions to extract elevator door state.
+ElevatorDoorTracker class to extract elevator door state.
 """
 
 from collections import deque
@@ -68,16 +68,14 @@ class ElevatorDoorTracker:
 
     def process_state(self, points, image, cam_matrix, trans, rot, print_state=False):
         """
-        Returns ElevatorDoorState, whether door is moving
-        
-        sample depth between all lines
-        evaluate if depth is  
-            1) above a threshold --> manually tune, not general
-            2) above the average depth --> susceptible to inaccuracy if the floor depth dominates
-            3) above the leftmost/rightmost edge depth --> 
-            4) (when inside) above an initialized depth --> since first known state is closed
+        Returns ElevatorDoorState, including open/closed and whether door is moving.
 
-        use laser scan to position robot x distance away from door
+        Currently, only OPEN and CLOSED states are working reliably.
+
+        TODO:
+          - evaluate accuracy of moving boundaries
+          - make algo more efficient to increase update freq
+          - 
         """
         depth_delta = 0.15   # min diff in depth value to be considered sig. diff
         image_delta = 8  # min diff in px distance to be sig. diff
@@ -112,6 +110,7 @@ class ElevatorDoorTracker:
 
         # print(self.vertical_edges)
 
+        # get iterator, which will be evaluated on-demand by calling next()
         in_window = ((i, points[i]) for i, pt in enumerate(pixel_coords.T) 
                                     if midpt <= pt[0] < right)
 
@@ -136,6 +135,8 @@ class ElevatorDoorTracker:
 
             ### determine door bounds
             sample_depth = sample[2]
+            # TODO take an avg of all depths in window as sample, currently only first 
+
             # print(sample)
             # print('L: %d   R: %d' % (left, right))
             is_deep = lambda depth: depth - depth_delta > self.door_depth

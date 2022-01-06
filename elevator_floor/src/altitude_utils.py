@@ -6,7 +6,6 @@ This is a helper function file that takes in imu data from a
 
 Functions to extract elevator acceleration and height
 """
-# from numpy import floor
 import rospy
 import numpy as np
 from math import sqrt, exp, pi
@@ -16,24 +15,15 @@ from unitree_legged_msgs.msg import HighState
 from sensor_msgs.msg import Imu
 from scipy.ndimage import gaussian_filter1d
 
-# NO LONGER USED
-def get_acceleration(high_state):
-    ''' Returns time, acceleration at current state
-    '''
-    accelerometer = high_state.imu.accelerometer
 
-    # TODO change 9.8 to calibration average
-    return 9.9 - accelerometer[2]
+def get_gaussian_filter(sigma, n):
+    r = range(-int(n/2),int(n/2)+1)
+    return [1 / (sigma * sqrt(2*pi)) * exp(-float(x)**2/(2*sigma**2)) for x in r]
 
-# acceleration data
+# TODO implement Kalman filtering
 
-def started_moving(acceleration):
-    noise_bound = 0.5
-    print(acceleration)
-    if acceleration <= noise_bound or acceleration >= -noise_bound:
-        return False
-    
-    return True
+
+### Ignore Unused Functions below
 
 def calc_vel_displacement(accelerations, delta_t):
     ''' Calculate velocity and displacement
@@ -60,6 +50,3 @@ def smooth_data(accelerations):
     return np.array(gaussian_filter1d(accelerations, 100))
 
 
-def get_gaussian_filter(sigma, n):
-    r = range(-int(n/2),int(n/2)+1)
-    return [1 / (sigma * sqrt(2*pi)) * exp(-float(x)**2/(2*sigma**2)) for x in r]

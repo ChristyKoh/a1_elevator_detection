@@ -7,7 +7,7 @@ Some plotting utils to display results
 
 import numpy as np
 import matplotlib.pyplot as plt
-import altitude_calc as ac
+import altitude_utils as ac
 from scipy import signal
 
 def plot_accelerations(process):

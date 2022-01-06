@@ -21,13 +21,13 @@ from std_msgs.msg import Bool, UInt8
 from elevator_floor.srv import FloorSetting
 from std_srvs.srv import Empty, EmptyResponse
 
-import altitude_calc as ac
+import altitude_utils as ac
 from plotting import *
 
 
 class CheckElevatorFloorProcess:
     '''
-    Wraps processing of imu data from input ros topic and publishing to elevator_floor topic
+    Wraps processing of imu data from HighState and publishing to elevator_floor topic
     '''
 
     def __init__(self, current_floor, a1_state_topic, floor_pub_topic, queue_len=101):
@@ -66,7 +66,10 @@ class CheckElevatorFloorProcess:
         self.elevator_floor_pub = rospy.Publisher(floor_pub_topic, UInt8, queue_size=10)
 
     def calibrate_offset(self, msg):
-        # set acceleration to mean of raw accelerations
+        """Set offset acceleration to mean of past queue_len(101) raw accelerations. 
+        
+            Also used as callback to calibrate_offset service.
+        """
         self.accel_offset = np.mean(self.raw_accels)
         
         if isnan(self.accel_offset):
@@ -80,7 +83,7 @@ class CheckElevatorFloorProcess:
         return EmptyResponse()
 
     def a1_state_callback(self, high_state):
-
+        """Callback to process each HighState. """
         try:
             z_accel = high_state.imu.accelerometer[2]
 
@@ -135,6 +138,7 @@ class CheckElevatorFloorProcess:
             return
 
     def set_current_floor_callback(self, floor):
+        """Callback for floor calibration service call."""
         # need mutex to handle multithreading?
         self.current_floor = floor.floor
         return self.current_floor
